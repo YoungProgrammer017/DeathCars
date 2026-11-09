@@ -30,6 +30,8 @@ export const RULES = {
   ramBonus: 1.5,          // 'ram' talent: the runner takes 50% more…
   ramSelf: 0.5,           // …and the hunter half of his already small share
   fromWalls: 0.45,        // walls: every car takes 45% of the energy (the hunter as much as the runners)
+  // a car that's off its wheels (roof, side, stuck on something) and doesn't move puts itself back after this long
+  autoFlip: 3, autoFlipSpeed: 1.2,
   fromGround: 0.85,       // the ground (a car landing on its roof or side, rolling over): most of it
   // falls: a car lands on its wheels without harm from up to ~1 m (4.5 m/s); every metre above that
   // breaks the suspension and the rims, shakes the engine off its mounts and, from high up, hurts the driver
@@ -379,7 +381,7 @@ export class Game {
       v.events.length = 0;
     }
     for (const d of this.decoys) d.vehicle.events.length = 0;
-    if (this.state === 'chase') for (const p of this.players) if (p.alive) this._landing(p);
+    if (this.state === 'chase') for (const p of this.players) if (p.alive) { this._landing(p); this._autoFlip(p, dt); }
 
     if (this.state === 'chase') {
       this._updateTimed(dt);
@@ -437,6 +439,21 @@ export class Game {
     D.driver = Math.min(1, D.driver + RULES.landDriver * Math.max(0, h - 1.5));
     this.emit({ type: 'fx', kind: 'landing', player: p.id, h, x: v.pos[0], y: v.pos[1], z: v.pos[2] });
     this._checkWreck(p);
+  }
+  // lying on the roof or the side (or hung up with its wheels off the ground) and not moving: count up, then
+  // put it back on its wheels where it is (p.flipT drives the countdown on the screen)
+  _autoFlip(p, dt) {
+    const v = p.vehicle;
+    let onWheels = 0;
+    for (const w of v.wheels) if (w.contact && !w.detached) onWheels++;
+    const stuck = (this._upY(v) < 0.5 || onWheels < 2) && Math.abs(v.speed) < RULES.autoFlipSpeed && Math.hypot(v.vel[1], v.w[0], v.w[1], v.w[2]) < 1;
+    if (!stuck) { p.flipT = 0; return; }
+    p.flipT = (p.flipT || 0) + dt;
+    if (p.flipT >= RULES.autoFlip) {
+      p.flipT = 0;
+      v.recover();
+      this.emit({ type: 'fx', kind: 'autoFlip', player: p.id });
+    }
   }
   _upY(v) { return 1 - 2 * (v.q[0] * v.q[0] + v.q[2] * v.q[2]); }
 

@@ -175,7 +175,7 @@ const pName = (p) => `<b style="color:${p.color}">${esc(p.name)}</b>`;
 // ---------------------------------------------------------------------------
 const keys = new Set();
 const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
-  'KeyR', 'KeyC', 'KeyH', 'Tab', 'Digit1', 'KeyE', 'KeyM']);
+  'KeyC', 'KeyH', 'Tab', 'Digit1', 'KeyE', 'KeyM']);
 // sound (synthesised, see audio.js); browsers let it start only after a click or a key
 const sfx = new GameAudio();
 const SOUND_VOL = { loud: 0.9, quiet: 0.4, off: 0 };
@@ -192,13 +192,6 @@ function onCommand(code) {
   if (code === 'KeyH') { $('help').classList.toggle('hidden'); return; }
   if (code === 'KeyM') { toast(sfx.toggleMute() ? 'Звук выключен (M)' : 'Звук включён', 1200); return; }
   if (game.state !== 'chase' && game.state !== 'countdown') return;
-  if (code === 'KeyR') {
-    if (net.on) { net.send({ t: 'act', a: 'recover' }); return; }
-    const v = me.vehicle;
-    const upY = 1 - 2 * (v.q[0] * v.q[0] + v.q[2] * v.q[2]);
-    if (me.alive && (upY < 0.5 || Math.abs(v.speed) < 3)) { v.recover(); toast('Машина снова на колёсах'); }
-    return;
-  }
   if (code === 'Tab') { spectateIdx++; return; }
   if (code === 'Digit1' || code === 'KeyE') pendingMods.push('talent');
 }
@@ -232,7 +225,6 @@ function padCommands(dt) {
     return;
   }
   if (pads.pressed('r1') || pads.pressed('square')) onCommand('Digit1');
-  if (pads.pressed('triangle')) onCommand('KeyR');
   if (pads.pressed('l1')) onCommand('Tab');
   if (pads.pressed('create')) onCommand('KeyH');
   const rx = Math.abs(s.rx) > 0.12 ? s.rx : 0, ry = Math.abs(s.ry) > 0.12 ? s.ry : 0;
@@ -1592,6 +1584,7 @@ function updateGameHud() {
   else if (game.state === 'countdown' && game.br) st = `Раунд ${game.round}\n<small>Каждый сам за себя: ты на ${esc(CARS[me.car].name)} — разбей всех и останься на ходу</small>`;
   else if (game.state === 'countdown') st = `Раунд ${game.round}\n<small>${me.role === 'hunter' ? `Ты ловец на ${esc(CARS[me.car].name)} — разбей всех убегающих` : `Ты убегаешь на ${esc(CARS[me.car].name)} — продержись до конца. Ловец на ${esc(CARS[game.hunter.car].name)}`}</small>`;
   else if (game.state === 'chase' && game.hunterHold > 0) st = me.role === 'hunter' ? `Жди… ${Math.ceil(game.hunterHold)}\n<small>Убегающие разъезжаются</small>` : `Разъезжайся! Ловец через ${Math.ceil(game.hunterHold)}`;
+  else if (game.state === 'chase' && me.alive && me.flipT > 0.25) st = `Встаём на колёса через ${Math.max(0, RULES.autoFlip - me.flipT).toFixed(1)}\n<small>машина перевёрнута и стоит — сейчас сама встанет</small>`;
   else if (game.state === 'chase' && !me.alive) st = `Ты разбит — наблюдаешь\n<small>Tab — сменить камеру</small>`;
   setHTML('status', $('status'), st.replace(/\n/g, '<br>'));
 
@@ -1769,7 +1762,7 @@ function netApplyPlayers(s, first) {
     if (!p) continue;
     p.name = o.id === net.pid ? `${o.n} (ты)` : o.n;
     p.role = o.r; p.color = o.c; p.garage = o.g; p.money = o.m; p.alive = o.a; p.wreck = o.w; p.ready = o.rd;
-    p.wins = o.wins; p.charges = o.ch; p.cd = o.cd || {}; p.roundEarn = o.re; p.matchEarn = o.me; p.aliveTime = o.at; p.roundKills = o.k;
+    p.wins = o.wins; p.charges = o.ch; p.cd = o.cd || {}; p.flipT = o.ft || 0; p.roundEarn = o.re; p.matchEarn = o.me; p.aliveTime = o.at; p.roundKills = o.k;
     p.isBot = o.id !== net.pid; p.remote = false;
     let fresh = first;
     if (p.car !== o.car || p.vehicle.spec.id !== o.car) { p.car = o.car; game._ensureVehicle(p); fresh = true; }
@@ -1904,6 +1897,7 @@ function fxEvent(e) {
     case 'explode': explosion(e.x, e.y, e.z); sfx.explode([e.x, e.y, e.z]);
       { const mv = game.human && game.human.vehicle; if (mv) { const d = Math.hypot(mv.pos[0] - e.x, mv.pos[2] - e.z); if (d < 40) pads.kick(Math.min(1, 1.3 - d / 30), Math.min(1, 1 - d / 40), 0.6); } } { const f = followed(); if (f && f.vehicle && Math.hypot(f.vehicle.pos[0] - e.x, f.vehicle.pos[2] - e.z) < 30) cam.shake = 1; } break;
     case 'smoke': smokeEmitters.push({ x: e.x, z: e.z, r: e.r, t: 1.6 }); break;
+    case 'autoFlip': if (e.player === game.human.id) toast('Машина снова на колёсах', 1400); break;
     case 'landing': {
       // a hard landing: a thud, a ring of dust, the camera and the pad shake
       const sev = clamp(e.h / 4, 0.15, 1.2), gy = world.height(e.x, e.z) + 0.05;

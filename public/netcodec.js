@@ -54,7 +54,7 @@ export function unpackVehicle(v, a, first) {
 export function packPlayer(p) {
   return {
     id: p.id, n: p.name, r: p.role, c: p.color, car: p.car, g: p.garage, m: p.money, a: p.alive, w: p.wreck || null,
-    rd: !!p.ready, h: !!p.remote, wins: p.wins || 0, ch: p.charges, cd: p.cd || {}, re: p.roundEarn, me: p.matchEarn || 0,
+    rd: !!p.ready, h: !!p.remote, wins: p.wins || 0, ch: p.charges, cd: p.cd || {}, ft: Math.round((p.flipT || 0) * 10) / 10, re: p.roundEarn, me: p.matchEarn || 0,
     at: Math.round((p.aliveTime || 0) * 10) / 10, k: p.roundKills || 0, v: packVehicle(p.vehicle),
   };
 }

@@ -160,10 +160,7 @@ function join(ws) {
         break;
       case 'act':
         if (!p || game.state !== 'chase') break;
-        if (m.a === 'recover') {
-          const v = p.vehicle, upY = 1 - 2 * (v.q[0] * v.q[0] + v.q[2] * v.q[2]);
-          if (p.alive && (upY < 0.5 || Math.abs(v.speed) < 3)) { v.recover(); game.emit({ type: 'toast', player: p.id, text: 'Машина снова на колёсах' }); }
-        } else if (m.a === 'talent' && p.netActions.length < 4) p.netActions.push('talent');
+        if (m.a === 'talent' && p.netActions.length < 4) p.netActions.push('talent');
         break;
       case 'spin': {
         const res = p && game.state === 'upgrade' ? game.spin(p, String(m.car), Number(m.bet) || 0) : null;
