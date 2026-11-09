@@ -255,6 +255,13 @@
     <div class="field"><label>Ботов</label><div class="seg" id="optBots"><button data-v="1">1</button><button data-v="2" class="on">2</button><button data-v="3">3</button></div></div>
     <div class="field"><label>Длительность раунда</label><div><input id="optChase" type="range" min="60" max="300" step="30" value="180"><div style="font-size:13px;color:var(--dim)"><span id="optChaseTxt">3:00</span> на раунд</div></div></div>
     <div class="field"><label>Графика<br><small style="font-size:11px">отражения в полу, свечение; Ультра — ещё затенение (AO)</small></label><div class="seg" id="optGfx"><button data-v="ultra">Ультра</button><button data-v="high" class="on">Высокая</button><button data-v="normal">Обычная</button></div></div>
+    <div class="field"><label>Геймпад<br><small style="font-size:11px">стик — руль, R2/L2 — газ/тормоз, ✕ — ручник, R1/□ — талант, △ — на колёса, ○ — назад, правый стик — камера</small></label>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+        <div class="seg" id="optRumble"><span style="font-size:12px;color:var(--dim);margin-right:4px">Вибрация</span><button data-v="strong">Сильная</button><button data-v="normal" class="on">Обычная</button><button data-v="off">Выкл</button></div>
+        <div class="seg" id="optTrig"><span style="font-size:12px;color:var(--dim);margin-right:4px">Адаптивные триггеры</span><button data-v="on" class="on">Вкл</button><button data-v="off">Выкл</button></div>
+        <div><button class="btn" id="dsBtn" style="padding:6px 12px;font-size:13px">Подключить DualSense</button></div>
+        <div id="padStatus" style="font-size:12px;color:var(--dim);max-width:340px;text-align:right">DualSense: нажми «Подключить» один раз (Chrome/Edge), остальные геймпады работают сами</div>
+      </div></div>
     <div class="field"><label>Звук<br><small style="font-size:11px">M — выключить в игре</small></label><div class="seg" id="optSound"><button data-v="loud" class="on">Громко</button><button data-v="quiet">Тихо</button><button data-v="off">Выкл</button></div></div>
     <div class="field"><label>Твои стартовые деньги<br><small style="font-size:11px">для теста, ботам — как обычно</small></label><div class="seg" id="optMoney"><button data-v="0" class="on">Обычно</button><button data-v="5000">5 000</button><button data-v="20000">20 000</button><button data-v="100000">100 000</button></div></div>
     <div class="field" id="fieldRole"><label>Твоя роль</label><div class="seg" id="optRole"><button data-v="random" class="on">Случайно</button><button data-v="hunter">Ловец</button><button data-v="runner">Убегающий</button></div></div>

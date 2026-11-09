@@ -6,6 +6,7 @@ import { unpackVehicle } from './netcodec.js';
 import { createGfx, LAYER_FULL, LAYER_PROXY } from './gfx.js';
 import { MeshoptSimplifier } from './meshopt_simplifier.js';
 import { GameAudio } from './audio.js';
+import { Pads } from './gamepad.js';
 import { buildArena, ARENA_R, SUN_DIR as ARENA_SUN, LIGHT as ARENA_LIGHT } from './arena.js';
 import { Game, RULES, CARS, CAR_LIST, TALENTS, specFor } from './game.js';
 import { CAR_GEO } from './cargeo.js';
@@ -210,8 +211,38 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
+// gamepads (any pad; a DualSense through WebHID also gets adaptive triggers, rumble and its light bar)
+const pads = new Pads();
+const RUMBLE_MUL = { strong: 1, normal: 0.65, off: 0 };
+document.addEventListener('visibilitychange', () => { if (document.hidden) pads.quiet(); });
 
-function readInput() {
+// pad buttons: R1/Square talent, Triangle back on the wheels, Circle look back, L1 next car to watch, Create help;
+// in menus Cross/Options press the main button (Start, Ready, Next); right stick turns the camera
+const OVERLAY_MAIN = { menu: 'startBtn', upgrader: 'readyBtn', roundEnd: 'reNext', matchEnd: 'meAgain' };
+function padCommands(dt) {
+  const s = pads.poll();
+  if (!s) return;
+  if (pads.busy) hideClickHint();
+  const ov = document.querySelector('.overlay.show');
+  if (ov) {
+    if (pads.pressed('cross') || pads.pressed('options')) {
+      const b = $(OVERLAY_MAIN[ov.id]);
+      if (b && !b.disabled && b.offsetParent !== null) b.click();
+    }
+    return;
+  }
+  if (pads.pressed('r1') || pads.pressed('square')) onCommand('Digit1');
+  if (pads.pressed('triangle')) onCommand('KeyR');
+  if (pads.pressed('l1')) onCommand('Tab');
+  if (pads.pressed('create')) onCommand('KeyH');
+  const rx = Math.abs(s.rx) > 0.12 ? s.rx : 0, ry = Math.abs(s.ry) > 0.12 ? s.ry : 0;
+  if (rx || ry) {
+    cam.yaw = wrap(cam.yaw - rx * Math.abs(rx) * dt * 3.2);
+    cam.pitch = clamp(cam.pitch + ry * Math.abs(ry) * dt * 1.8, -0.08, 1.3);
+    cam.lastMouse = performance.now() / 1000;
+  }
+}
+function readKeys() {
   const k = (c) => keys.has(c);
   return {
     throttle: k('KeyW') || k('ArrowUp') ? 1 : 0,
@@ -219,6 +250,12 @@ function readInput() {
     steer: (k('KeyA') || k('ArrowLeft') ? 1 : 0) - (k('KeyD') || k('ArrowRight') ? 1 : 0), // + = left
     handbrake: k('Space'),
   };
+}
+function readInput() {
+  const kb = readKeys(), pd = pads.drive();
+  if (!pd) return kb;
+  return { throttle: Math.max(kb.throttle, pd.throttle), brake: Math.max(kb.brake, pd.brake),
+    steer: kb.steer || pd.steer, handbrake: kb.handbrake || pd.handbrake };
 }
 
 const cam = { yaw: 0, pitch: 0.2, dist: 7.0, smoothDist: 7.0, lastMouse: -10, dragging: false, head: 0, shake: 0, followId: -1 };
@@ -394,6 +431,7 @@ function carHitFx(cv, ev) {
     }
     sparkBurst(p, n, Math.round(8 + 45 * Math.min(sev, 1)), v.vel);
     sfx.impact(p, sev, ev.kind);
+    if (cv.player === game.human && sev > 0.03) pads.kick(Math.min(1, 0.2 + sev * 0.9), Math.min(1, 0.35 + sev * 0.7), 0.12 + 0.3 * Math.min(sev, 1));
     if (ev.kind === 'wall') {
       for (let i = 0; i < 6 + 14 * Math.min(sev, 1); i++) {
         fx.dust.emit(p[0] + rnd(-0.3, 0.3), p[1] + rnd(-0.2, 0.4), p[2] + rnd(-0.3, 0.3),
@@ -977,7 +1015,7 @@ function followed() {
 function showOverlay(id) {
   for (const el of document.querySelectorAll('.overlay')) el.classList.toggle('show', el.id === id);
 }
-const menuState = { mode: 'tag', bots: 2, chaseTime: 180, role: 'random', myMoney: 0, gfx: 'high', sound: 'loud' };
+const menuState = { mode: 'tag', bots: 2, chaseTime: 180, role: 'random', myMoney: 0, gfx: 'high', sound: 'loud', rumble: 'normal', trig: 'on' };
 try { Object.assign(menuState, JSON.parse(localStorage.getItem('salki.settings') || '{}')); } catch (_) { /* ignore */ }
 function initMenu() {
   const seg = (id, key, conv) => {
@@ -1003,6 +1041,24 @@ function initMenu() {
   seg('optRole', 'role', String);
   seg('optMoney', 'myMoney', Number);
   seg('optGfx', 'gfx', String);
+  // gamepad: rumble strength, adaptive triggers on/off, the DualSense connection (WebHID)
+  seg('optRumble', 'rumble', String);
+  seg('optTrig', 'trig', String);
+  const applyPad = () => { pads.rumbleMul = RUMBLE_MUL[menuState.rumble] ?? 0.65; pads.trigOn = menuState.trig !== 'off'; };
+  applyPad();
+  for (const id of ['optRumble', 'optTrig']) for (const b of $(id).querySelectorAll('button')) b.addEventListener('click', () => {
+    applyPad();
+    if (id === 'optRumble' && pads.rumbleMul > 0) pads.kick(0.6 * pads.rumbleMul / 0.65, 0.5, 0.3);   // a sample
+  });
+  const padStatus = (t) => { $('padStatus').textContent = t; };
+  pads.onStatus = padStatus;
+  if (!pads.hidSupported) $('dsBtn').title = 'Нужен Chrome или Edge на компьютере';
+  $('dsBtn').addEventListener('click', async () => {
+    try { if (!(await pads.connectDualSense())) padStatus('DualSense не выбран'); }
+    catch (e) { padStatus(/permission|policy|allowed/i.test(e.message) ? 'Здесь браузер не даёт доступ к геймпаду: открой игру на deathcars.onrender.com' : e.message); }
+  });
+  window.addEventListener('gamepadconnected', (e) => { if (!pads.hid) padStatus(`Геймпад подключён: ${e.gamepad.id.replace(/\s*\(.*\)\s*$/, '')}`); });
+  pads.autoConnect();
   seg('optSound', 'sound', String);
   sfx.setVolume(SOUND_VOL[menuState.sound] ?? 0.9);
   for (const b of $('optSound').querySelectorAll('button')) b.addEventListener('click', () => {
@@ -1591,7 +1647,7 @@ function handleGameEvents() {
         if (e.br) feed(`${pName(v)} разбит${why}` + (e.by ? ` · ${pName(game.players[e.byId])} <b class="cGold">+${e.reward}</b>` : ' (сам)'));
         else if (e.hunter) feed(`${pName(v)} (ловец) разбит${why}!`);
         else feed(`${pName(v)} разбит${why}${e.reward ? ` · ловцу <b class="cGold">+${e.reward}</b>${e.full ? '' : ' (сам разбился)'}` : ''}`);
-        if (e.victimId === me.id) toast(`Твоя машина разбита${why}`, 3000);
+        if (e.victimId === me.id) { toast(`Твоя машина разбита${why}`, 3000); pads.kick(1, 1, 0.7); }
         break;
       }
       case 'roundEnd': {
@@ -1632,10 +1688,11 @@ function fxEvent(e) {
       if (!cv) break;
       if (e.wheel >= 0) throwWheel(cv, e.wheel, false);
       else for (let i = 0; i < 4 + (cv.extraWheels ? cv.extraWheels.length : 0); i++) throwWheel(cv, i, true);
-      if (e.wheel >= 0 && e.player === game.human.id) toast('Колесо оторвало!', 1600);
+      if (e.wheel >= 0 && e.player === game.human.id) { toast('Колесо оторвало!', 1600); pads.kick(0.8, 0.5, 0.3); }
       break;
     }
-    case 'explode': explosion(e.x, e.y, e.z); sfx.explode([e.x, e.y, e.z]); { const f = followed(); if (f && f.vehicle && Math.hypot(f.vehicle.pos[0] - e.x, f.vehicle.pos[2] - e.z) < 30) cam.shake = 1; } break;
+    case 'explode': explosion(e.x, e.y, e.z); sfx.explode([e.x, e.y, e.z]);
+      { const mv = game.human && game.human.vehicle; if (mv) { const d = Math.hypot(mv.pos[0] - e.x, mv.pos[2] - e.z); if (d < 40) pads.kick(Math.min(1, 1.3 - d / 30), Math.min(1, 1 - d / 40), 0.6); } } { const f = followed(); if (f && f.vehicle && Math.hypot(f.vehicle.pos[0] - e.x, f.vehicle.pos[2] - e.z) < 30) cam.shake = 1; } break;
     case 'smoke': smokeEmitters.push({ x: e.x, z: e.z, r: e.r, t: 1.6 }); break;
     case 'jump': {
       const v = game.players[e.player].vehicle;
@@ -1664,7 +1721,7 @@ function fxEvent(e) {
       const v = game.players[e.player].vehicle, wh = v.wheels[e.wheel];
       sfx.fx('puncture', [wh.cp[0], wh.cp[1], wh.cp[2]]);
       sparkBurst([wh.cp[0], wh.cp[1] + 0.1, wh.cp[2]], [0, 1, 0], 14, v.vel);
-      if (e.player === game.human.id) toast('Колесо пробито шипами!', 1800);
+      if (e.player === game.human.id) { toast('Колесо пробито шипами!', 1800); pads.kick(0.6, 0.6, 0.25); }
       break;
     }
     case 'harpoon': if (e.runner === game.human.id) toast('Тебя зацепили гарпуном!', 1600); break;
@@ -1736,6 +1793,7 @@ async function start() {
 
     // --- rules + physics ---
     const playing = game.state === 'chase' || game.state === 'countdown';
+    padCommands(dt);
     const input = playing && !overlayOpen() ? readInput() : { throttle: 0, brake: 0, steer: 0, handbrake: false };
     const actions = pendingMods.splice(0);
     let alpha = 0;
@@ -1743,6 +1801,12 @@ async function start() {
     if (net.on && net.mid) alpha = netFrame(now, input, actions);
     else if (game.state !== 'menu' && !carsBuilding && !waitCars) alpha = game.update(dt, input, actions);
     if (game.state === 'upgrade') tickUpgrader(dt);
+    // the pad's triggers and rumble follow your own car
+    {
+      const mv = me && me.alive && me.vehicle && playing && !overlayOpen() && !document.hidden ? me.vehicle : null;
+      if (me) pads.setColor(me.color);
+      pads.feedback(dt, mv, input);
+    }
 
     try {
       handleGameEvents();
@@ -1782,7 +1846,7 @@ async function start() {
         cam.yaw = wrap(cam.yaw) * Math.exp(-dt * 2.2);   // back behind the car by the shortest way
         cam.pitch += (0.2 - cam.pitch) * (1 - Math.exp(-dt * 1.5));
       }
-      const lookBack = keys.has('KeyC') ? Math.PI : 0;
+      const lookBack = keys.has('KeyC') || pads.held('circle') ? Math.PI : 0;
       const H = cam.head + cam.yaw + lookBack;
       const cp = Math.cos(cam.pitch), spch = Math.sin(cam.pitch);
       const dx = -Math.sin(H) * cp, dy = spch, dz = -Math.cos(H) * cp;
