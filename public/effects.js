@@ -423,6 +423,9 @@ export class CarDamageVisuals {
   _prepare(mesh) {
     const geo = mesh.geometry;
     if (!geo.attributes.normal) geo.computeVertexNormals();
+    // the bounds are worked out once (a little roomy): dents only push the skin in, so they stay valid and a dent
+    // doesn't have to walk the whole mesh again
+    if (geo.computeBoundingSphere) { geo.computeBoundingSphere(); if (geo.boundingSphere) geo.boundingSphere.radius += 0.2; }
     const pos = geo.attributes.position, n = pos.count;
     const idx = geo.index ? geo.index.array : null;
     const triCount = idx ? idx.length / 3 : n / 3;
@@ -601,6 +604,9 @@ export class CarDamageVisuals {
         for (let c = 0; c < 3; c++) { const u = tri[t + c]; if (e.stamp[u] !== id) { e.stamp[u] = id; e.vlist[cnt++] = u; } }
       }
     }
+    // remember which parts of the buffers changed (blocks of 4096 vertices) so only those go to the GPU
+    const B = e.dirtyB || (e.dirtyB = new Uint8Array((n >> 12) + 1));
+    for (let j = 0; j < cnt; j++) B[e.vlist[j] >> 12] = 1;
     for (let j = 0; j < cnt; j++) {
       const v = e.vlist[j];
       let sx = 0, sy = 0, sz = 0;
@@ -618,11 +624,23 @@ export class CarDamageVisuals {
     }
     if (upload) this._upload(e);
   }
+  // send the changed blocks to the GPU (not the whole car: the detailed models have up to a million vertices)
   _upload(e) {
-    const g = e.mesh.geometry;
-    g.attributes.position.needsUpdate = true;
-    g.attributes.normal.needsUpdate = true;
-    if (g.computeBoundingSphere) g.computeBoundingSphere();
+    const g = e.mesh.geometry, P = g.attributes.position, N = g.attributes.normal, B = e.dirtyB;
+    if (B && P.addUpdateRange && N.addUpdateRange) {
+      let any = false;
+      for (let b = 0; b < B.length;) {
+        if (!B[b]) { b++; continue; }
+        let b1 = b;
+        while (b1 < B.length && B[b1]) B[b1++] = 0;
+        const v0 = b << 12, v1 = Math.min(P.count, b1 << 12);
+        if (v1 > v0) { P.addUpdateRange(v0 * 3, (v1 - v0) * 3); N.addUpdateRange(v0 * 3, (v1 - v0) * 3); any = true; }
+        b = b1;
+      }
+      if (!any) return;
+    }
+    P.needsUpdate = true;
+    N.needsUpdate = true;
   }
 
   // closest point on the car surface (glass or body triangles) to a physics-frame point
@@ -779,9 +797,10 @@ export class CarDamageVisuals {
   repair() {
     for (const e of this.entries) {
       e.pos.set(e.orig); e.nrm.set(e.origN);
-      const g = e.mesh.geometry;
-      g.attributes.position.needsUpdate = true; g.attributes.normal.needsUpdate = true;
-      if (g.computeBoundingSphere) g.computeBoundingSphere();
+      const g = e.mesh.geometry, P = g.attributes.position, N = g.attributes.normal;
+      if (P.clearUpdateRanges) { P.clearUpdateRanges(); N.clearUpdateRanges(); }   // the whole buffers this time
+      if (e.dirtyB) e.dirtyB.fill(0);
+      P.needsUpdate = true; N.needsUpdate = true;
     }
     for (const d of this.decals) this._remove(d);
     this.decals.length = 0;
