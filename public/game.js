@@ -1,7 +1,7 @@
 // game.js — match rules: roles, rounds, crash damage, money, upgrader, talents and bots.
 // No rendering here: the renderer reads the state and the `events` queue.
 import { Vehicle, Simulation, swapVehicles, makeSpec, WALL_RESTITUTION } from './physics.js';
-const FLIP_REACH = 1.5;   // how far in front of the bumper the Alfa's flipper plate reaches (m)
+const FLIP_REACH = 2.6;   // how far in front of the bumper the Alfa's flipper plate reaches (m)
 import { CARS, CAR_LIST, TALENTS, START_CAR } from './cars.js';
 import { CAR_GEO } from './cargeo.js';
 export { CARS, CAR_LIST, TALENTS };
@@ -40,7 +40,7 @@ export const RULES = {
   wedgeSelf: 3,           // the VAZ's front is this many times stiffer behind the wedge…
   wedgeOther: 0.4,        // …and the car it rams takes this much more
   // the Alfa's flipper: the car in front goes up (lighter cars higher) and tips over away from it
-  flipLift: 6.5, flipPush: 2.5, flipSpin: 2.6,
+  flipLift: 8.5, flipPush: 3.5, flipSpin: 2.0,
   runnerVsRunner: 0.6,    // two runners bumping
   creditWindow: 5,        // s: a runner that dies within this time after a hunter hit counts fully for the hunter
   // battle royale: everyone for himself, no roles and no hunter's breaks
@@ -564,7 +564,7 @@ export class Game {
       for (let i = 0; i < W.length; i += 3) {
         q[0] = W[i]; q[1] = W[i + 1]; q[2] = W[i + 2];
         v.toLocal(q, l);
-        if (l[2] > zf - 0.4 && l[2] < zf + FLIP_REACH && Math.abs(l[0]) < x1 + 0.35 && l[1] > -0.9 && l[1] < 1.3) { out.push(o); break; }
+        if (l[2] > zf - 0.5 && l[2] < zf + FLIP_REACH && Math.abs(l[0]) < x1 + 0.7 && l[1] > -0.9 && l[1] < 1.5) { out.push(o); break; }
       }
     }
     return out;
@@ -606,7 +606,7 @@ export class Game {
         // the plate kicks up whatever is on it (it fires even with nothing there)
         const hit = this._flipTargets(p);
         for (const o of hit) {
-          const ov = o.vehicle, k = clamp(Math.sqrt(1500 / ov.m), 0.45, 1.15);
+          const ov = o.vehicle, k = clamp(Math.pow(1500 / ov.m, 0.35), 0.62, 1.1);
           ov.vel[1] += RULES.flipLift * k;
           ov.vel[0] += f[0] * RULES.flipPush * k; ov.vel[2] += f[1] * RULES.flipPush * k;
           ov.w[0] += f[1] * RULES.flipSpin * k; ov.w[2] -= f[0] * RULES.flipSpin * k;   // its near side goes up
