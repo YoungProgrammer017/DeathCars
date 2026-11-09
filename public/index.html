@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Салки на выживание</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root { --panel: rgba(12, 14, 20, 0.62); --line: rgba(255,255,255,0.12); --text: #f2f4f8; --dim: #8b93a5; --accent: #ff3b30; --ok: #34c759; --warn: #ffcc00; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f14; color: var(--text); font-family: 'Exo 2', system-ui, sans-serif; user-select: none; }
+  canvas { display: block; outline: none; }
+  .hud { position: fixed; pointer-events: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+
+  #speedo { right: 22px; bottom: 22px; width: 250px; padding: 14px 18px 16px; }
+  #speedo .row { display: flex; align-items: flex-end; justify-content: space-between; }
+  #speed { font-size: 64px; font-weight: 800; line-height: 0.9; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+  #speedUnit { font-size: 13px; color: var(--dim); margin-left: 6px; }
+  #gear { font-size: 46px; font-weight: 800; line-height: 0.9; min-width: 44px; text-align: center; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,0.08); }
+  #gearMode { font-size: 10px; color: var(--dim); text-align: center; margin-top: 3px; letter-spacing: 1px; }
+  #rpmBar { position: relative; height: 10px; margin-top: 12px; border-radius: 6px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  #rpmFill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: linear-gradient(90deg, #4cd964, #ffcc00 70%, #ff3b30 92%); background-size: 214px 100%; background-repeat: no-repeat; }
+  #rpmRed { position: absolute; top: 0; bottom: 0; left: 94%; right: 0; background: rgba(255,59,48,0.35); }
+  #rpmText { margin-top: 6px; font-size: 12px; color: var(--dim); display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+
+  #assists { left: 22px; top: 18px; padding: 8px 10px; display: flex; gap: 6px; align-items: center; }
+  .tag { font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line); color: var(--dim); transition: background .08s, color .08s; }
+  .tag.on { color: var(--text); }
+  .tag.off { text-decoration: line-through; opacity: 0.5; }
+  .tag.active { background: var(--warn); color: #111; border-color: var(--warn); }
+  #fps { font-size: 12px; color: var(--dim); margin-left: 6px; font-variant-numeric: tabular-nums; min-width: 62px; }
+
+  #damage { right: 22px; bottom: 178px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
+  #damage svg { width: 84px; height: 151px; flex: none; }
+  #damage .legend { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--dim); }
+  #damage .legend div { display: flex; align-items: center; gap: 6px; }
+  #damage .legend i { display: inline-block; width: 10px; height: 10px; background: rgba(255,255,255,0.35); }
+  #damage .legend .lg-eng { border-radius: 2px; }
+  #damage .legend .lg-gbx { width: 8px; height: 8px; border-radius: 2px; }
+  #damage .legend .lg-drv { border-radius: 3px 3px 1px 1px; }
+  #damage .legend .lg-whl { width: 6px; height: 12px; border-radius: 2px; }
+  #damage .legend .lg-brk { border-radius: 50%; }
+  #damage .legend .lg-sus { height: 0; border-top: 2.5px solid rgba(255,255,255,0.35); background: none; transform: rotate(-25deg); }
+  #damage .key { font-size: 11px; color: var(--dim); margin-top: 2px; }
+  /* --- game HUD --- */
+  :root { --hunter: #ff4d4d; --runner: #4da3ff; --gold: #ffd25a; }
+  #topbar { left: 50%; top: 14px; transform: translateX(-50%); padding: 8px 18px; display: flex; gap: 20px; align-items: center; font-size: 15px; font-weight: 600; white-space: nowrap; }
+  #topbar .timer { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 62px; text-align: center; }
+  #topbar .timer.low { color: var(--hunter); }
+  .cHunter { color: var(--hunter); } .cRunner { color: var(--runner); } .cGold { color: var(--gold); }
+  #status { left: 50%; top: 30%; transform: translate(-50%, -50%); font-size: 34px; font-weight: 800; text-align: center; text-shadow: 0 2px 12px rgba(0,0,0,0.7); white-space: pre-line; }
+  #status small { display: block; font-size: 16px; font-weight: 600; color: #dfe4ee; margin-top: 6px; }
+  #playersPanel { left: 22px; top: 64px; padding: 10px 12px; width: 236px; display: flex; flex-direction: column; gap: 8px; }
+  .prow { display: grid; grid-template-columns: 12px 1fr auto; column-gap: 8px; align-items: center; font-size: 13px; }
+  .prow .dot { width: 12px; height: 12px; border-radius: 4px; }
+  .prow .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow .nm small { font-weight: 400; color: var(--dim); margin-left: 4px; }
+  .prow .money { color: var(--gold); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .prow.dead { opacity: 0.45; }
+  .prow.dead .nm { text-decoration: line-through; }
+  .prow .st { grid-column: 2 / 4; font-size: 11px; color: #ff6b5e; margin-top: 1px; }
+  #feed { right: 22px; top: 64px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  #feed div { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 5px 10px; font-size: 13px; animation: fadeout 6s forwards; }
+  @keyframes fadeout { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+  #abilities { left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 8px; }
+  .ab { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; min-width: 104px; text-align: center; backdrop-filter: blur(6px); }
+  .ab .k { display: inline-block; font-weight: 800; background: rgba(255,255,255,0.14); border-radius: 6px; padding: 1px 7px; margin-right: 6px; }
+  .ab .n { font-size: 13px; font-weight: 600; }
+  .ab .c { font-size: 12px; color: var(--dim); margin-top: 3px; }
+  .ab.empty { opacity: 0.4; }
+  .ab.passive { border-style: dashed; }
+  #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .tag3d { position: absolute; transform: translate(-50%, -100%); font-size: 12px; font-weight: 700; text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,0.9); white-space: nowrap; }
+
+  /* --- overlays: menu, upgrader, results --- */
+  .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 8; background: rgba(6, 8, 12, 0.55); backdrop-filter: blur(3px); }
+  .overlay.show { display: flex; }
+  .card { background: rgba(16, 19, 27, 0.94); border: 1px solid var(--line); border-radius: 18px; padding: 22px 26px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .card h2 { margin: 0 0 4px; font-size: 26px; font-weight: 800; }
+  .card .sub { color: var(--dim); font-size: 14px; margin-bottom: 18px; }
+  .btn { font: 600 15px 'Exo 2', sans-serif; color: #fff; background: var(--accent); border: 0; border-radius: 10px; padding: 10px 20px; cursor: pointer; }
+  .btn:hover { filter: brightness(1.12); }
+  .btn:disabled { opacity: 0.4; cursor: default; filter: none; }
+  .btn.ghost { background: rgba(255,255,255,0.1); }
+  .seg { display: inline-flex; background: rgba(255,255,255,0.07); border-radius: 10px; padding: 3px; gap: 3px; }
+  .seg button { font: 600 14px 'Exo 2', sans-serif; color: var(--dim); background: transparent; border: 0; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+  .seg button.on { background: rgba(255,255,255,0.16); color: #fff; }
+  .field { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 12px; margin: 12px 0; font-size: 14px; }
+  .field label { color: var(--dim); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  #menu .card { width: 560px; max-height: calc(100vh - 40px); overflow: auto; }
+  #menu .rules { font-size: 13px; color: var(--dim); line-height: 1.55; margin: 14px 0 18px; padding: 12px 14px; background: rgba(255,255,255,0.04); border-radius: 10px; }
+  #menu .rules b { color: var(--text); font-weight: 600; }
+
+  #upgrader .card { width: min(1080px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow: auto; }
+  #upHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  #upTimer { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #upBody { display: grid; grid-template-columns: 1fr 300px; gap: 22px; }
+  #modGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 10px; align-content: start; }
+  .mod { position: relative; background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; text-align: left; color: var(--text); font-family: 'Exo 2', sans-serif; }
+  .mod:hover { background: rgba(255,255,255,0.09); }
+  .mod.sel { border-color: var(--gold); background: rgba(255, 210, 90, 0.09); }
+  .mod.owned { border-color: rgba(76, 217, 100, 0.45); }
+  .mod.driving { border-color: #4cd964; background: rgba(76, 217, 100, 0.10); }
+  .mod .t { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 14px; line-height: 1.2; }
+  .mod .t span:last-child { color: var(--gold); white-space: nowrap; }
+  .mod .tal { font-size: 12px; color: #9fd0ff; margin-top: 5px; line-height: 1.3; }
+  .mod .tal small { display: block; color: var(--dim); font-size: 11px; }
+  .mod .o { font-size: 11px; color: #7ee08f; margin-top: 5px; font-weight: 600; }
+  .stats { display: grid; grid-template-columns: 74px 1fr; gap: 2px 8px; margin-top: 7px; font-size: 11px; color: var(--dim); align-items: center; }
+  .stats .sb { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+  .stats .sb div { height: 100%; background: linear-gradient(90deg, #5ac8fa, #34c759); border-radius: 3px; }
+  .tag3d small.carname { display: block; font-size: 10px; color: var(--dim); font-weight: 500; }
+  #wheelBox { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #wheel { width: 220px; height: 220px; }
+  #wheelInfo { font-size: 14px; text-align: center; min-height: 40px; }
+  #betRow { width: 100%; }
+  #betRow .vals { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); margin-top: 4px; }
+  #betQuick { display: flex; gap: 6px; }
+  #betQuick button { font: 600 12px 'Exo 2', sans-serif; color: var(--text); background: rgba(255,255,255,0.08); border: 0; border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+  #spinBtn { width: 100%; font-size: 17px; padding: 12px; }
+  #upResult { font-size: 18px; font-weight: 800; min-height: 24px; }
+  #upResult.win { color: #4cd964; } #upResult.lose { color: var(--hunter); }
+  #upFeed { font-size: 12px; color: var(--dim); margin-top: 14px; max-height: 76px; overflow: auto; line-height: 1.5; }
+  #upFoot { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+
+  #roundEnd .card, #matchEnd .card { width: 560px; }
+  table.res { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0 16px; }
+  table.res td, table.res th { padding: 6px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  table.res th { color: var(--dim); font-weight: 600; font-size: 12px; }
+  table.res td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .big { font-size: 30px; font-weight: 800; margin: 2px 0 6px; }
+  #help { left: 22px; bottom: 22px; padding: 12px 16px; font-size: 13px; line-height: 1.65; max-width: 330px; }
+  #help b { display: inline-block; min-width: 74px; color: #fff; font-weight: 600; }
+  #help .muted { color: var(--dim); font-size: 12px; margin-top: 4px; }
+  #help.hidden { display: none; }
+
+  #toast { left: 50%; top: 74px; z-index: 6; transform: translateX(-50%); padding: 8px 16px; font-size: 14px; font-weight: 600; opacity: 0; transition: opacity .25s; }
+  #toast.show { opacity: 1; }
+
+  #clickHint { left: 50%; top: 42%; transform: translate(-50%, -50%); padding: 14px 22px; font-size: 18px; font-weight: 600; display: none; }
+
+  #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, #1b1f2a 0%, #0b0d12 70%); z-index: 10; transition: opacity .5s; }
+  #loading h1 { font-size: 30px; font-weight: 800; margin: 0 0 6px; letter-spacing: 0.5px; }
+  #loading p { color: var(--dim); margin: 0 0 22px; }
+  #bar { width: 320px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.1); overflow: hidden; }
+  #barFill { height: 100%; width: 0%; background: var(--accent); transition: width .15s; }
+  #loadText { margin-top: 10px; font-size: 13px; color: var(--dim); }
+
+  #error { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 640px; width: calc(100% - 40px); background: #2a0f12; border: 1px solid #ff3b30; border-radius: 12px; padding: 16px 18px; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; color: #ffd7d4; z-index: 20; display: none; white-space: pre-wrap; user-select: text; }
+  #error strong { font-family: 'Exo 2', sans-serif; font-size: 16px; color: #fff; display: block; margin-bottom: 6px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loading">
+  <h1>Салки на выживание</h1>
+  <p>Арена «Колизей» · 13 машин</p>
+  <div id="bar"><div id="barFill"></div></div>
+  <div id="loadText">Загрузка…</div>
+</div>
+
+<div id="assists" class="hud panel">
+  <span id="fps">— FPS</span>
+</div>
+
+<div id="topbar" class="hud panel" style="display:none">
+  <span id="roundTxt">Раунд 1/5</span>
+  <span id="scoreBox"><span class="cHunter">Ловец <b>0</b></span> : <span class="cRunner"><b>0</b> Убегающие</span></span>
+  <span id="timerTxt" class="timer">3:00</span>
+</div>
+<div id="status" class="hud"></div>
+<div id="playersPanel" class="hud panel" style="display:none"></div>
+<div id="feed" class="hud"></div>
+<div id="abilities" class="hud"></div>
+<div id="labels"></div>
+
+<div id="speedo" class="hud panel">
+  <div class="row">
+    <div><span id="speed">0</span><span id="speedUnit">км/ч</span></div>
+    <div><div id="gear">1</div><div id="gearMode">АКПП</div></div>
+  </div>
+  <div id="rpmBar"><div id="rpmFill"></div><div id="rpmRed"></div></div>
+  <div id="rpmText"><span id="rpm">1000 об/мин</span><span>8400 max</span></div>
+</div>
+
+<div id="damage" class="hud panel">
+  <svg viewBox="0 0 100 180" aria-label="Повреждения машины">
+    <!-- body, front at the top; the car's left side is on the left -->
+    <rect id="dmgBody" x="22" y="8" width="56" height="164" rx="18" fill="rgba(255,255,255,0.04)" stroke-width="2.5"/>
+    <path d="M30 64 Q50 56 70 64 L67 76 Q50 71 33 76 Z" fill="rgba(255,255,255,0.13)"/>
+    <path d="M32 140 Q50 144 68 140 L69 150 Q50 154 31 150 Z" fill="rgba(255,255,255,0.09)"/>
+    <!-- suspension arms (wishbones) between the wheels and the body -->
+    <g fill="none" stroke-width="2.6" stroke-linecap="round">
+      <path id="dmgSusp0" d="M22 38 L37 46 L22 54"/><path id="dmgSusp1" d="M78 38 L63 46 L78 54"/>
+      <path id="dmgSusp2" d="M22 124 L37 132 L22 140"/><path id="dmgSusp3" d="M78 124 L63 132 L78 140"/>
+    </g>
+    <!-- wheels with the brake disc in the hub -->
+    <rect id="dmgWheel0" x="11" y="32" width="11" height="28" rx="3"/><rect id="dmgWheel1" x="78" y="32" width="11" height="28" rx="3"/>
+    <rect id="dmgWheel2" x="11" y="118" width="11" height="28" rx="3"/><rect id="dmgWheel3" x="78" y="118" width="11" height="28" rx="3"/>
+    <circle id="dmgBrake0" cx="16.5" cy="46" r="3.6" stroke="#111" stroke-width="1"/><circle id="dmgBrake1" cx="83.5" cy="46" r="3.6" stroke="#111" stroke-width="1"/>
+    <circle id="dmgBrake2" cx="16.5" cy="132" r="3.6" stroke="#111" stroke-width="1"/><circle id="dmgBrake3" cx="83.5" cy="132" r="3.6" stroke="#111" stroke-width="1"/>
+    <!-- engine (moved to the middle / rear for mid- and rear-engined cars) and gearbox -->
+    <g id="dmgEngineG"><rect id="dmgEngine" x="39" y="18" width="22" height="30" rx="3"/>
+      <path d="M44 23 v20 M50 23 v20 M56 23 v20" stroke="rgba(0,0,0,0.35)" stroke-width="2"/></g>
+    <g id="dmgGearboxG"><rect id="dmgGearbox" x="43" y="52" width="14" height="16" rx="3"/>
+      <circle cx="50" cy="60" r="3.2" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1.6"/></g>
+    <!-- driver: left front seat, steering wheel in front -->
+    <path d="M30 82 a8 4 0 0 1 16 0" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
+    <rect id="dmgDriver" x="30" y="86" width="16" height="20" rx="4"/>
+    <path id="dmgDriverX" d="M31 87 L45 105 M45 87 L31 105" stroke="#fff" stroke-width="2.4" stroke-linecap="round" style="display:none"/>
+  </svg>
+  <div class="legend">
+    <div><i class="lg-eng"></i>двигатель</div>
+    <div><i class="lg-gbx"></i>коробка</div>
+    <div><i class="lg-drv"></i>водитель</div>
+    <div><i class="lg-whl"></i>колёса</div>
+    <div><i class="lg-brk"></i>тормоза</div>
+    <div><i class="lg-sus"></i>подвеска</div>
+  </div>
+</div>
+
+<div id="help" class="hud panel">
+  <div><b>W / S</b> газ / тормоз, задний ход</div>
+  <div><b>A / D</b> руль</div>
+  <div><b>Пробел</b> ручник</div>
+  <div><b>Мышь</b> зажми и тяни — камера, колесо — зум</div>
+  <div><b>C</b> смотреть назад</div>
+  <div><b>1 / E</b> талант машины</div>
+  <div><b>R</b> поставить на колёса (если перевернулся)</div>
+  <div><b>M</b> звук вкл / выкл</div>
+  <div><b>Tab</b> сменить камеру (когда выбыл)</div>
+  <div class="muted">H — скрыть подсказку · машина чинится сама между раундами<br>Машина разбита, если не может ехать быстрее 50 км/ч или погиб водитель (он сидит слева)</div>
+  <div class="muted">Арена «Колизей» построена прямо в коде игры</div>
+</div>
+
+<div id="toast" class="hud panel"></div>
+
+<div id="menu" class="overlay">
+  <div class="card">
+    <h2>Салки на выживание</h2>
+    <div class="sub">Локальный тест с ботами</div>
+    <div class="field"><label>Онлайн<br><small style="font-size:11px">игра с друзьями через сервер</small></label><div style="display:flex;gap:8px;align-items:center"><input id="netName" maxlength="16" placeholder="Твоё имя" style="width:140px;padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.35);color:#fff;font:inherit"><button class="btn" id="netBtn" style="padding:7px 14px">Подключиться</button></div></div>
+    <div id="netStatus" style="font-size:13px;color:#ffd98a;margin:-4px 0 8px;min-height:1em"></div>
+    <div class="field"><label>Режим</label><div class="seg" id="optMode"><button data-v="tag" class="on">Салки</button><button data-v="br">Королевская битва</button></div></div>
+    <div class="field"><label>Ботов</label><div class="seg" id="optBots"><button data-v="1">1</button><button data-v="2" class="on">2</button><button data-v="3">3</button></div></div>
+    <div class="field"><label>Длительность раунда</label><div><input id="optChase" type="range" min="60" max="300" step="30" value="180"><div style="font-size:13px;color:var(--dim)"><span id="optChaseTxt">3:00</span> на раунд</div></div></div>
+    <div class="field"><label>Графика<br><small style="font-size:11px">отражения в полу, свечение; Ультра — ещё затенение (AO)</small></label><div class="seg" id="optGfx"><button data-v="ultra">Ультра</button><button data-v="high" class="on">Высокая</button><button data-v="normal">Обычная</button></div></div>
+    <div class="field"><label>Звук<br><small style="font-size:11px">M — выключить в игре</small></label><div class="seg" id="optSound"><button data-v="loud" class="on">Громко</button><button data-v="quiet">Тихо</button><button data-v="off">Выкл</button></div></div>
+    <div class="field"><label>Твои стартовые деньги<br><small style="font-size:11px">для теста, ботам — как обычно</small></label><div class="seg" id="optMoney"><button data-v="0" class="on">Обычно</button><button data-v="5000">5 000</button><button data-v="20000">20 000</button><button data-v="100000">100 000</button></div></div>
+    <div class="field" id="fieldRole"><label>Твоя роль</label><div class="seg" id="optRole"><button data-v="random" class="on">Случайно</button><button data-v="hunter">Ловец</button><button data-v="runner">Убегающий</button></div></div>
+    <div class="rules" id="rulesBr" style="display:none">
+      <b>Королевская битва — 5 раундов, каждый сам за себя.</b> Ловцов нет, и правил ловца тоже: урон для всех одинаковый — ни у кого нет неуязвимого бампера или скидки на урон, стены бьют всех одинаково (талант «Таран» у Armored Car работает).<br>
+      <b>Раунд</b> выигрывает последний, кто остался на ходу. Если время вышло — тот, кто разбил больше соперников, при равенстве — у кого машина целее. Матч выигрывает тот, кто взял больше раундов.<br>
+      <b>Деньги:</b> +120 за каждого разбитого соперника (засчитывается тому, кто ударил его последним), +150 за победу в раунде, +1 за каждую секунду на ходу.<br>
+      <b>Машины.</b> Все начинают на Small Price Car, в апгрейдере доступны все 13 машин. Самые дорогие — броневики M3A1 Scout Car (6 500) и Armored Car (9 000).
+    </div>
+    <div class="rules" id="rulesTag">
+      <b>Матч — 5 раундов.</b> Один ловец на весь матч, выбирается случайно. Побеждает команда, взявшая больше раундов.<br>
+      <b>Ловец</b> разбивает машины убегающих. Здоровья нет: удар сминает кузов и ломает то, что внутри, — двигатель, коробку, колёса, тормоза, подвеску, а удар в дверь водителя (слева) может его убить. Машина разбита, если больше не может ехать быстрее 50 км/ч или погиб водитель. Передний бампер ловца — таран: ему самому такие удары не вредят, от ударов в бока и зад — втрое меньше урона. От стен урон у всех одинаковый.<br>
+      <b>Убегающие</b> побеждают, если к концу времени жив хоть один. Ловец стартует через 3 секунды.<br>
+      <b>Машины.</b> Убегающие начинают на самой простой машине, ловец — на Sci-Fi Police Car. В апгрейдере перед каждым раундом (45 с) разыгрываются машины получше: ставка ÷ цена = шанс. Выигранная машина остаётся в гараже до конца матча, у многих есть свой талант (клавиша 1 или E).
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center"><span>Твои деньги: <b class="cGold" id="menuMoney">300</b></span><button class="btn" id="startBtn">Начать матч</button></div>
+    <div id="credits" style="font-size:11px;color:var(--dim);line-height:1.45;margin-top:14px"></div>
+  </div>
+</div>
+
+<div id="upgrader" class="overlay">
+  <div class="card">
+    <div id="upHead">
+      <div><h2>Апгрейдер</h2><div class="sub" id="upSub">Раунд 1/5 · ты — ловец</div></div>
+      <div style="text-align:right"><div id="upTimer">0:45</div><div style="font-size:14px">Деньги: <b class="cGold" id="upMoney">0</b></div></div>
+    </div>
+    <div id="upBody">
+      <div id="modGrid"></div>
+      <div id="wheelBox">
+        <canvas id="wheel" width="440" height="440"></canvas>
+        <div id="upResult"></div>
+        <div id="wheelInfo">Выбери машину</div>
+        <div id="betRow">
+          <input id="bet" type="range" min="1" max="100" value="50">
+          <div class="vals"><span>Ставка: <b class="cGold" id="betVal">0</b></span><span>Шанс: <b id="chanceVal">0%</b></span></div>
+        </div>
+        <div id="betQuick"><button data-f="0.25">25%</button><button data-f="0.5">50%</button><button data-f="1">Макс</button></div>
+        <button class="btn" id="spinBtn" disabled>Крутить</button>
+      </div>
+    </div>
+    <div id="upFeed"></div>
+    <div id="upFoot"><span style="font-size:13px;color:var(--dim)">Шанс = ставка ÷ цена, максимум 80%. Ставка сгорает в любом случае. Клик по своей машине — пересесть на неё.</span><button class="btn ghost" id="readyBtn">Готов</button></div>
+  </div>
+</div>
+
+<div id="roundEnd" class="overlay">
+  <div class="card">
+    <div class="sub" id="reSub">Раунд 1/5</div>
+    <div class="big" id="reTitle">Победили убегающие</div>
+    <div id="reReason" style="color:var(--dim);font-size:14px"></div>
+    <table class="res" id="reTable"></table>
+    <div style="display:flex;justify-content:space-between;align-items:center"><span id="reScore"></span><button class="btn" id="reNext">Дальше</button></div>
+  </div>
+</div>
+
+<div id="matchEnd" class="overlay">
+  <div class="card">
+    <div class="sub">Матч окончен</div>
+    <div class="big" id="meTitle">Победили убегающие</div>
+    <div id="meScore" style="font-size:16px"></div>
+    <table class="res" id="meTable"></table>
+    <div style="display:flex;justify-content:flex-end;gap:10px"><button class="btn ghost" id="meMenu">Меню</button><button class="btn" id="meAgain">Новый матч</button></div>
+  </div>
+</div>
+<div id="clickHint" class="hud panel">Кликни по экрану, чтобы управлять машиной</div>
+<div id="error"></div>
+
+<script>
+  // Show any error on screen so it can be reported
+  function showError(msg) {
+    const el = document.getElementById('error');
+    el.style.display = 'block';
+    el.innerHTML = '<strong>Ошибка — пришли мне скриншот этого окна</strong>' + String(msg).replace(/</g, '&lt;');
+  }
+  window.addEventListener('error', e => showError((e.message || e) + (e.filename ? `\n${e.filename}:${e.lineno}:${e.colno}` : '')));
+  window.addEventListener('unhandledrejection', e => showError(e.reason && (e.reason.stack || e.reason.message) || e.reason));
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

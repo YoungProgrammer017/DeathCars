@@ -1,0 +1,9 @@
+{
+  "name": "salki-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Салки на выживание — online server (the game runs here, browsers show it and send keys)",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node server.js" }
+}
