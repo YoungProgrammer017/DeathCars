@@ -244,6 +244,8 @@ export function makeSpec(id, geo, st) {
     steering: { ...B.steering, lock: B.steering.lock * st.steer },
     // a big rear wing and diffuser (GT3 R): downforce lift coefficient × area, m²
     aero: st.downforce ? { ...B.aero, clA: st.downforce } : B.aero,
+    // front equipment that sticks out of the body: a steel wedge (ram) or a flipper plate
+    equip: { ram: !!st.ram, flipper: !!st.flipper },
   };
 }
 
@@ -346,6 +348,7 @@ export class Vehicle {
     this._wc.s = 0; this._wc.target = 0; this._wc.start = -9;
     for (const w of this.wheels) { w.toeSign = 0; w.zoneGrip = 1; w.detached = false; }
     this.misfire = false;
+    this.ram = this.spec.equip && this.spec.equip.ram ? 1 : 0;
     this.destroyed = false; this.boost = 0; this.extDamp = 0; this.extForce.fill(0);
   }
 
@@ -393,6 +396,14 @@ export class Vehicle {
     add(x1, z0, d, -d);
     for (const f of [-0.75, -0.375, 0, 0.375, 0.75]) add(x1, zm + f * zh, 1, 0);
     this.stations = st;
+    // equipment in front of the bumper: a pointed wedge (furthest out in the middle) or a flat flipper plate
+    const eq = sp.equip || {};
+    this.frontAdd = new Float64Array(st.length);
+    if (eq.ram || eq.flipper) st.forEach((s, i) => {
+      if (eq.ram) this.frontAdd[i] = s.nz > 0.99 ? RAM_LEN * (1 - 0.98 * Math.abs(s.x) / x1) : s.nz > 0.5 ? 0.08 : 0;
+      else this.frontAdd[i] = s.nz > 0.99 ? FLIP_LEN : s.nz > 0.5 ? FLIP_LEN * 0.5 : 0;
+    });
+    this.ram = eq.ram ? 1 : 0;                  // the wedge's state 1..0; 0 = it has come off
     this.crush = new Float64Array(st.length);   // crush for the damage model (game rules)
     this.dent = new Float64Array(st.length);    // the outline as it is now (physics)
     this._olx = new Float64Array(st.length); this._olz = new Float64Array(st.length);
@@ -530,8 +541,9 @@ export class Vehicle {
 
   // the (dented) outline in local x/z
   outlineLocal() {
-    const S = this.stations, D = this.dent;
-    for (let i = 0; i < S.length; i++) { this._olx[i] = S[i].x - S[i].nx * D[i]; this._olz[i] = S[i].z - S[i].nz * D[i]; }
+    const S = this.stations, D = this.dent, F = this.frontAdd, eq = this.spec.equip || {};
+    const fOn = eq.ram ? (this.ram > 0 ? 1 : 0) : 1;
+    for (let i = 0; i < S.length; i++) { this._olx[i] = S[i].x - S[i].nx * D[i]; this._olz[i] = S[i].z - S[i].nz * D[i] + F[i] * fOn; }
     return [this._olx, this._olz];
   }
   // ...and in the world, at bumper height
@@ -1380,6 +1392,8 @@ export class Vehicle {
 
 // How deep the body really folds compared with the crash model's crush (which sets the damage to the parts):
 // the visible dents and the collision outline use this share, so a crash looks and drives like a real one.
+export const RAM_LEN = 0.75;   // how far the VAZ's steel wedge sticks out in front of the bumper (tip, m)
+export const FLIP_LEN = 0.22;  // the Alfa's flipper plate
 export const CRUSH_LOOK = 0.55;
 export const SIDE_CRUSH_MAX = 0.3;   // the deepest a door/sill folds in (m)
 // height of the collision outline above the centre of mass (bumpers: wall hits don't roll the car)

@@ -10,7 +10,7 @@ export function packVehicle(v) {
     R3(v.pos[0]), R3(v.pos[1]), R3(v.pos[2]), R4(v.q[0]), R4(v.q[1]), R4(v.q[2]), R4(v.q[3]),
     R3(v.vel[0]), R3(v.vel[1]), R3(v.vel[2]),
     Math.round(v.rpm || 0), R3(c.throttle || 0), R3(c.brake || 0), v.gear || 1, R3(v.speed || 0), R3(v.boost || 0),
-    (v.misfire ? 1 : 0) | (v.destroyed ? 2 : 0) | (v.frozen ? 4 : 0), R3(v.pushBar ?? 0),
+    (v.misfire ? 1 : 0) | (v.destroyed ? 2 : 0) | (v.frozen ? 4 : 0), R3(v.pushBar ?? 0), R3(v.ram ?? 0),
     R3(d.engine), R3(d.gearbox), R3(d.body), R3(d.driver),
   ];
   for (let i = 0; i < 4; i++) o.push(R3(d.wheels[i]), R3(d.susp[i]), R3(d.brakes[i]));
@@ -37,7 +37,7 @@ export function unpackVehicle(v, a, first) {
   v.rpm = a[i++]; v.ctl.throttle = a[i++]; v.ctl.brake = a[i++]; v.gear = a[i++]; v.speed = a[i++]; v.boost = a[i++];
   const f = a[i++];
   v.misfire = !!(f & 1); v.destroyed = !!(f & 2); v.frozen = !!(f & 4);
-  v.pushBar = a[i++];
+  v.pushBar = a[i++]; v.ram = a[i++];
   const d = v.damage;
   d.engine = a[i++]; d.gearbox = a[i++]; d.body = a[i++]; d.driver = a[i++];
   for (let k = 0; k < 4; k++) { d.wheels[k] = a[i++]; d.susp[k] = a[i++]; d.brakes[k] = a[i++]; }
@@ -54,7 +54,7 @@ export function unpackVehicle(v, a, first) {
 export function packPlayer(p) {
   return {
     id: p.id, n: p.name, r: p.role, c: p.color, car: p.car, g: p.garage, m: p.money, a: p.alive, w: p.wreck || null,
-    rd: !!p.ready, h: !!p.remote, wins: p.wins || 0, ch: p.charges, re: p.roundEarn, me: p.matchEarn || 0,
+    rd: !!p.ready, h: !!p.remote, wins: p.wins || 0, ch: p.charges, cd: p.cd || {}, re: p.roundEarn, me: p.matchEarn || 0,
     at: Math.round((p.aliveTime || 0) * 10) / 10, k: p.roundKills || 0, v: packVehicle(p.vehicle),
   };
 }

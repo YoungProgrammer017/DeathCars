@@ -242,6 +242,7 @@ export class GameAudio {
     switch (kind) {
       case 'nitro': hiss('bandpass', 400, 3000, 0.9, 0.7, 1.2); tone('sawtooth', 120, 420, 0.8, 0.15); break;
       case 'jump': tone('sine', 180, 720, 0.35, 0.5); hiss('lowpass', 800, 200, 0.3, 0.4); break;
+      case 'flip': tone('sine', 140, 45, 0.3, 0.9); tone('square', 70, 40, 0.12, 0.25); hiss('highpass', 3500, 900, 0.35, 0.45); break;   // hydraulic ram
       case 'oil': case 'glue': hiss('lowpass', 900, 120, 0.5, 0.8); break;
       case 'spikes': for (let i = 0; i < 4; i++) tone('square', 1800 + i * 300, 900, 0.08, 0.15, t + i * 0.05); break;
       case 'harpoon': hiss('highpass', 1500, 5000, 0.25, 0.5); tone('square', 600, 120, 0.2, 0.2, t + 0.25); break;

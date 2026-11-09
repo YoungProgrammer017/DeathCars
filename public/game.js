@@ -1,6 +1,7 @@
 // game.js — match rules: roles, rounds, crash damage, money, upgrader, talents and bots.
 // No rendering here: the renderer reads the state and the `events` queue.
 import { Vehicle, Simulation, swapVehicles, makeSpec, WALL_RESTITUTION } from './physics.js';
+const FLIP_REACH = 1.5;   // how far in front of the bumper the Alfa's flipper plate reaches (m)
 import { CARS, CAR_LIST, TALENTS, START_CAR } from './cars.js';
 import { CAR_GEO } from './cargeo.js';
 export { CARS, CAR_LIST, TALENTS };
@@ -33,6 +34,13 @@ export const RULES = {
   pushBarEnergy: 60000,   // J: what a new push bar soaks up from wall hits before it's flat
   pushBarSelf: 4,         // its car's front is this many times stiffer (takes that much less)…
   pushBarOther: 0.5,      // …and the car it hits takes this much more (both × the bar's state 0..1)
+  // the VAZ's steel wedge: walls smash it (it comes off), cars hardly wear it
+  wedgeWallEnergy: 55000,   // J of wall hits it soaks up before it breaks off
+  wedgeCarEnergy: 500000,   // J of car hits that would wear it out (so it loses only a little per crash)
+  wedgeSelf: 3,           // the VAZ's front is this many times stiffer behind the wedge…
+  wedgeOther: 0.4,        // …and the car it rams takes this much more
+  // the Alfa's flipper: the car in front goes up (lighter cars higher) and tips over away from it
+  flipLift: 6.5, flipPush: 2.5, flipSpin: 2.6,
   runnerVsRunner: 0.6,    // two runners bumping
   creditWindow: 5,        // s: a runner that dies within this time after a hunter hit counts fully for the hunter
   // battle royale: everyone for himself, no roles and no hunter's breaks
@@ -113,7 +121,7 @@ export class Game {
       p.garage = [p.car];
       p.color = br ? CAR_COLORS.solo[i % CAR_COLORS.solo.length]
         : p.role === 'hunter' ? CAR_COLORS.hunter : CAR_COLORS.runners[ci++ % CAR_COLORS.runners.length];
-      p.charges = {};
+      p.charges = {}; p.cd = {};
       p.vehicle = this.sim.add(new Vehicle(specFor(p.car), this.world, { seed: 0x1234567 + i * 7919 }));
       p.vehicle.owner = p;
       p.vehicle.wallCrushFactor = RULES.fromWalls;
@@ -232,9 +240,10 @@ export class Game {
     this.state = 'countdown';
     this.timer = RULES.getReadyTime;
     for (const p of this.players) {
-      p.charges = {};
+      p.charges = {}; p.cd = {};
       const t = CARS[p.car].talent;
-      if (t && !TALENTS[t].passive) p.charges[t] = TALENTS[t].charges;
+      // a talent with a cooldown works any number of times (p.cd counts down); the others have charges
+      if (t && !TALENTS[t].passive) p.charges[t] = TALENTS[t].cooldown ? 1 : TALENTS[t].charges;
     }
     this.emit({ type: 'state', state: 'countdown' });
   }
@@ -323,6 +332,7 @@ export class Game {
         if (this.hunterHold <= 0) { this.hunter.vehicle.frozen = false; this.emit({ type: 'hunterGo' }); }
       }
       for (const p of this.players) if (p.alive && p.role !== 'hunter') p.aliveTime += dt;
+      for (const p of this.players) if (p.cd) for (const k in p.cd) if (p.cd[k] > 0) p.cd[k] = Math.max(0, p.cd[k] - dt);
     } else if (this.state === 'roundEnd') {
       this.timer -= dt;
       if (this.timer <= 0) this.next();
@@ -399,6 +409,14 @@ export class Game {
       v.pushBar = Math.max(0, v.pushBar - take / RULES.pushBarEnergy);
       Eb -= take;
       this.emit({ type: 'fx', kind: 'pushBar', player: p.id, state: v.pushBar });
+    }
+    // the VAZ's wedge takes nearly all of a front hit, and a hard one smashes it off
+    if (v.ram > 0 && v.isFrontHit(ev.p, ev.n)) {
+      const take = Math.min(Eb * 0.9, v.ram * RULES.wedgeWallEnergy);
+      v.ram = Math.max(0, v.ram - take / RULES.wedgeWallEnergy);
+      Eb -= take;
+      if (v.ram < 0.02) { v.ram = 0; this.emit({ type: 'fx', kind: 'ramOff', player: p.id }); }
+      else this.emit({ type: 'fx', kind: 'ram', player: p.id, state: v.ram });
     }
     // the roof (upside down, on the side against a wall) crushes too; the floor pan doesn't
     const ny = ev.n[1] / (Math.hypot(ev.n[0], ev.n[1], ev.n[2]) || 1);
@@ -488,10 +506,15 @@ export class Game {
     const ba = pa && pb ? bar(a, la, na) : 0, bb = pa && pb ? bar(b, lb, nb) : 0;
     if (ba) fb *= 1 + RULES.pushBarOther * ba;
     if (bb) fa *= 1 + RULES.pushBarOther * bb;
-    let ka = a.stiffnessAt(na) / fa * (1 + RULES.pushBarSelf * ba), kb = b.stiffnessAt(nb) / fb * (1 + RULES.pushBarSelf * bb);
+    // the VAZ's wedge: the same, harder
+    const wedge = (v, l, n) => (v.ram > 0 && v.isFrontHit(l, n) ? 1 : 0);
+    const ra = pa && pb ? wedge(a, la, na) : 0, rb = pa && pb ? wedge(b, lb, nb) : 0;
+    if (ra) fb *= 1 + RULES.wedgeOther;
+    if (rb) fa *= 1 + RULES.wedgeOther;
+    let ka = a.stiffnessAt(na) / fa * (1 + RULES.pushBarSelf * ba) * (1 + RULES.wedgeSelf * ra), kb = b.stiffnessAt(nb) / fb * (1 + RULES.pushBarSelf * bb) * (1 + RULES.wedgeSelf * rb);
     if (H === pa && a.isFrontHit(la, na)) ka = Infinity;
     if (H === pb && b.isFrontHit(lb, nb)) kb = Infinity;
-    return { la, na, lb, nb, ka, kb, fa, fb, H };
+    return { la, na, lb, nb, ka, kb, fa, fb, H, ra, rb };
   }
 
   // Car-to-car crash: the energy lost in the hit (½·μ·v², the bodies crumple instead of bouncing) is split between
@@ -516,17 +539,43 @@ export class Game {
     // crush = √(2·E·share/k') = √(2·E·share·f/k): same as the bodies' plastic overlap in the physics
     if (roofA) a.absorbRoof(s.la, s.na, E * shareA * s.fa); else a.absorbHit(s.la, s.na, E * shareA * s.fa, 'car');
     if (roofB) b.absorbRoof(s.lb, s.nb, E * (1 - shareA) * s.fb); else b.absorbHit(s.lb, s.nb, E * (1 - shareA) * s.fb, 'car');
+    // the wedge wears a little and lifts the car it rams
+    for (const [v, pl, o, on] of [[a, pa, b, s.ra], [b, pb, a, s.rb]]) {
+      if (!on) continue;
+      v.ram = Math.max(0, v.ram - E / RULES.wedgeCarEnergy);
+      if (closing - prev > 1) o.vel[1] += Math.min(2, (closing - prev) * 0.15);
+      if (v.ram < 0.02) { v.ram = 0; this.emit({ type: 'fx', kind: 'ramOff', player: pl.id }); }
+      else this.emit({ type: 'fx', kind: 'ram', player: pl.id, state: v.ram });
+    }
     this._checkWreck(pa); this._checkWreck(pb);
     this.emit({ type: 'carHit', a: pa.id, b: pb.id, speed: closing, x: p[0], y: p[1], z: p[2] });
   }
 
   // ---------------------------------------------------------------- modifications
   talentOf(p) { return CARS[p.car].talent; }
+  // cars on the Alfa's flipper plate: just in front of its bumper, about as wide as the car
+  _flipTargets(p) {
+    const v = p.vehicle, sp = v.spec, x1 = sp.outline[1], zf = sp.bodyFront, out = [], l = new Float64Array(3), q = [0, 0, 0];
+    for (const o of this.players) {
+      if (o === p || !o.alive || !o.vehicle) continue;
+      const ov = o.vehicle;
+      if (Math.hypot(ov.pos[0] - v.pos[0], ov.pos[2] - v.pos[2]) > 10) continue;
+      const W = ov.outlineWorld();
+      for (let i = 0; i < W.length; i += 3) {
+        q[0] = W[i]; q[1] = W[i + 1]; q[2] = W[i + 2];
+        v.toLocal(q, l);
+        if (l[2] > zf - 0.4 && l[2] < zf + FLIP_REACH && Math.abs(l[0]) < x1 + 0.35 && l[1] > -0.9 && l[1] < 1.3) { out.push(o); break; }
+      }
+    }
+    return out;
+  }
   talentName(id) { const t = TALENTS[id]; return (this.br && t.nameBr) || t.name; }
   talentDesc(id) { const t = TALENTS[id]; return (this.br && t.descBr) || t.desc; }
 
   useMod(p, id) {
+    const T = TALENTS[id];
     if (this.state !== 'chase' || !p.alive || !(p.charges[id] > 0)) return false;
+    if (T && T.cooldown && p.cd && p.cd[id] > 0) return false;
     if (p.role === 'hunter' && this.hunterHold > 0) return false;
     const v = p.vehicle, f = this._fwd(v), x = v.pos[0], z = v.pos[2];
     const H = this.hunter;
@@ -553,6 +602,21 @@ export class Game {
         this.emit({ type: 'fx', kind: 'jump', player: p.id }); break;
       }
       case 'decoy': ok = this._spawnDecoy(p); break;
+      case 'flip': {
+        // the plate kicks up whatever is on it (it fires even with nothing there)
+        const hit = this._flipTargets(p);
+        for (const o of hit) {
+          const ov = o.vehicle, k = clamp(Math.sqrt(1500 / ov.m), 0.45, 1.15);
+          ov.vel[1] += RULES.flipLift * k;
+          ov.vel[0] += f[0] * RULES.flipPush * k; ov.vel[2] += f[1] * RULES.flipPush * k;
+          ov.w[0] += f[1] * RULES.flipSpin * k; ov.w[2] -= f[0] * RULES.flipSpin * k;   // its near side goes up
+          o.lastHitBy = p; o.lastHitT = this.time;
+          if (!this.br && p.role === 'hunter' && o.role !== 'hunter') o.lastHunterHit = this.time;
+        }
+        if (hit.length) v.vel[1] -= 0.6;
+        this.emit({ type: 'fx', kind: 'flip', player: p.id, hit: hit.map((o) => o.id) });
+        break;
+      }
       case 'swapRunner': {
         // the danger: the hunter (battle royale: the nearest rival); swap with the one furthest from it
         const T = this.br ? this._nearestRival(p) : H;
@@ -594,7 +658,10 @@ export class Game {
       }
       default: ok = false;
     }
-    if (ok) { p.charges[id]--; this.emit({ type: 'talent', player: p.id, id }); }
+    if (ok) {
+      if (T && T.cooldown) { p.cd = p.cd || {}; p.cd[id] = T.cooldown; } else p.charges[id]--;
+      this.emit({ type: 'talent', player: p.id, id });
+    }
     return ok;
   }
 
@@ -814,6 +881,10 @@ export class Game {
   _bot(p, dt) {
     const b = p.bot;
     b.t += dt; b.modCd -= dt;
+    if (CARS[p.car].talent === 'flip' && !(p.cd && p.cd.flip > 0) && !(p.role === 'hunter' && this.hunterHold > 0)) {
+      const foes = this._flipTargets(p).filter((o) => this.br || (o.role === 'hunter') !== (p.role === 'hunter'));
+      if (foes.length) this.useMod(p, 'flip');
+    }
     if (this.br) return this._botBr(p, dt);
     return p.role === 'hunter' ? this._botHunter(p, dt) : this._botRunner(p, dt, this.hunter);
   }

@@ -1,7 +1,7 @@
 // main.js — rendering, camera, input, HUD and menus. Rules live in game.js, physics in physics.js.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { ArenaWorld, Vehicle, CRUSH_LOOK, SIDE_CRUSH_MAX } from './physics.js';
+import { ArenaWorld, Vehicle, CRUSH_LOOK, SIDE_CRUSH_MAX, RAM_LEN, FLIP_LEN } from './physics.js';
 import { unpackVehicle } from './netcodec.js';
 import { createGfx, LAYER_FULL, LAYER_PROXY } from './gfx.js';
 import { MeshoptSimplifier } from './meshopt_simplifier.js';
@@ -773,6 +773,8 @@ async function buildCarVisual(carId, color) {
   try {
     if (CARS[carId].pushBar) buildPushBar(cv);
     if (CARS[carId].sideSpikes) buildSideSpikes(cv);
+    if (CARS[carId].ram) buildWedge(cv);
+    if (CARS[carId].flipper) buildFlipper(cv);
   } catch (e) { console.warn('equipment:', e); }
   return cv;
 }
@@ -841,8 +843,209 @@ function buildSideSpikes(cv) {
   }
   cv.sideSpikes = sides;
 }
+// the body's top line (above the centre of mass) at local z
+function topAt(sp, z) {
+  const Z = sp.shape.z, T = sp.shape.top;
+  if (z <= Z[0]) return T[0];
+  for (let i = 1; i < Z.length; i++) if (z <= Z[i]) return T[i - 1] + (T[i] - T[i - 1]) * (z - Z[i - 1]) / (Z[i] - Z[i - 1]);
+  return T[T.length - 1];
+}
+// worn galvanised steel: grey noise, rust runs, bright scratches
+let grimeTex = null;
+function grimeTexture() {
+  if (grimeTex) return grimeTex;
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#5f5c57'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 3000; i++) { const k = 70 + Math.floor(Math.random() * 60); g.fillStyle = `rgba(${k},${k - 3},${k - 9},0.4)`; g.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 3, 1 + Math.random() * 3); }
+  for (let i = 0; i < 45; i++) {
+    const x = Math.random() * 256, y0 = Math.random() * 256, h = 20 + Math.random() * 90, gr = g.createLinearGradient(x, y0, x, y0 + h);
+    gr.addColorStop(0, 'rgba(105,62,30,0.45)'); gr.addColorStop(1, 'rgba(105,62,30,0)');
+    g.fillStyle = gr; g.fillRect(x, y0, 2 + Math.random() * 6, h);
+  }
+  g.strokeStyle = 'rgba(215,215,210,0.4)';
+  for (let i = 0; i < 30; i++) { g.lineWidth = 0.5 + Math.random(); g.beginPath(); const x = Math.random() * 256, y0 = Math.random() * 256; g.moveTo(x, y0); g.lineTo(x + rnd(-45, 45), y0 + rnd(-8, 8)); g.stroke(); }
+  grimeTex = new THREE.CanvasTexture(c);
+  grimeTex.colorSpace = THREE.SRGBColorSpace; grimeTex.wrapS = grimeTex.wrapT = THREE.RepeatWrapping; grimeTex.anisotropy = 4;
+  return grimeTex;
+}
+// The VAZ's steel wedge: a V-plow (two big faces meet in a ridge that slopes back from a low tip), welded edges,
+// struts up to the roof. It bends as it wears and comes off when it breaks.
+function buildWedge(cv) {
+  const sp = cv.spec, y = (h) => h - sp.com[1], zf = sp.bodyFront, W = sp.outline[1] * 0.97, L = RAM_LEN;
+  const mat = new THREE.MeshStandardMaterial({ map: grimeTexture(), metalness: 0.55, roughness: 0.62, side: THREE.DoubleSide });
+  const g = new THREE.Group();
+  g.position.set(0, 0, zf);                                  // pivot at the bumper
+  const P = (x, h, dz) => [x, y(h), dz];
+  // a pyramid lying on its side: the point low in front, the big sloping top face ploughs cars up
+  const tip = P(0, 0.22, L + 0.08);
+  const bl = (s) => P(s * W, 0.13, 0.02), tl = (s) => P(s * W * 0.86, 0.88, 0.0);
+  const tris = [[tip, bl(1), tl(1)], [tip, tl(-1), bl(-1)], [tip, tl(1), tl(-1)], [tip, bl(-1), bl(1)]];
+  const pos = [], uv = [];
+  const put = (q) => { pos.push(...q); uv.push((q[0] + q[2]) * 1.3, q[1] * 1.3 + q[2] * 0.4); };
+  for (const t of tris) for (const q of t) put(q);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.computeVertexNormals();
+  const plow = new THREE.Mesh(geo, mat);
+  plow.castShadow = true; plow.receiveShadow = true;
+  g.add(plow);
+  // welded edges and the frame: struts from the top corners up to the front of the roof, mounts into the chassis
+  const r = 0.028, edge = new THREE.MeshStandardMaterial({ color: 0x3a3936, metalness: 0.7, roughness: 0.45 });
+  for (const s of [-1, 1]) { tube(g, tip, tl(s), r * 0.7, edge); tube(g, tip, bl(s), r * 0.7, edge); tube(g, tl(s), bl(s), r * 0.7, edge); }
+  tube(g, tl(-1), tl(1), r * 0.7, edge);
+  let zr = zf - 0.8;
+  const tmax = Math.max(...sp.shape.top);
+  for (let z = zf; z > zf - 3; z -= 0.05) if (topAt(sp, z) > tmax * 0.96) { zr = z; break; }
+  const roofH = topAt(sp, zr) + sp.com[1] - 0.02;
+  for (const s of [-1, 1]) {
+    tube(g, P(s * W * 0.55, 0.87, 0.0), P(s * W * 0.72, roofH, zr - zf), r, steelMat);
+    tube(g, P(s * W * 0.5, 0.2, 0.02), P(s * W * 0.5, 0.2, -0.32), r * 0.9, steelMat);
+    tube(g, P(s * W * 0.5, 0.6, 0.02), P(s * W * 0.5, 0.55, -0.3), r * 0.9, steelMat);
+  }
+  tube(g, P(-W * 0.72, roofH, zr - zf), P(W * 0.72, roofH, zr - zf), r, steelMat);
+  cv.root.add(g);
+  cv.wedge = { g, attached: true, tw: Math.random() < 0.5 ? -1 : 1 };
+}
+// The Alfa's flipper: a plate in the car's own red over the nose with a lip down to the road; hinged at the back,
+// two hydraulic rams under it throw it up.
+function buildFlipper(cv) {
+  const sp = cv.spec, y = (h) => h - sp.com[1], zf = sp.bodyFront, W = Math.min(0.74, sp.outline[1] * 0.86);
+  let paint = null;
+  cv.model.traverse((o) => { if (!paint && o.isMesh && o.material && /lambert17/i.test(o.material.name || '') && o.material.color) paint = o.material; });
+  // the same paint as the body
+  const plateMat = paint ? paint.clone() : new THREE.MeshStandardMaterial({ color: new THREE.Color(0.89, 0.013, 0.013), metalness: 0.35, roughness: 0.35 });
+  // the plate's line: just above the bonnet from the hinge to the bumper (a straight plate clearing the nose)
+  const zH = zf - 0.58, zP = zf + 0.05, hP = topAt(sp, zf) + sp.com[1] + 0.05;
+  let hH = hP;
+  for (let z = zH; z <= zf; z += 0.04) {
+    const need = topAt(sp, z) + sp.com[1] + 0.045;
+    hH = Math.max(hH, hP + (need - hP) * (zP - zH) / Math.max(0.05, zP - z));
+  }
+  const hinge = new THREE.Group();
+  hinge.position.set(0, y(hH), zH);
+  const plate = new THREE.Group();
+  hinge.add(plate);
+  const seg = (z0, h0, z1, h1, mat, th = 0.035) => {
+    const len = Math.hypot(z1 - z0, h1 - h0), a = Math.atan2(h0 - h1, z1 - z0);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(2 * W, th, len), mat);
+    m.rotation.x = a;
+    m.position.set(0, (h0 + h1) / 2 - hH, (z0 + z1) / 2 - zH);
+    m.castShadow = true; m.receiveShadow = true;
+    plate.add(m);
+    return m;
+  };
+  seg(zH, hH, zP, hP, plateMat);                                 // the plate
+  seg(zP, hP, zf + FLIP_LEN, 0.06, plateMat, 0.03);              // the lip down to the road
+  seg(zP - 0.02, hP - 0.03, zf + FLIP_LEN - 0.02, 0.07, steelMat, 0.012);   // its steel edge underneath
+  // hinge: a rod in two blocks
+  const rod = tube(hinge, [-W * 0.8, 0, 0], [W * 0.8, 0, 0], 0.03, chromeMat);
+  rod.castShadow = false;
+  for (const s of [-1, 1]) {
+    const blk = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.12), steelMat);
+    blk.position.set(s * W * 0.8, y(hH) - 0.03, zH); blk.castShadow = true;
+    cv.root.add(blk);
+  }
+  cv.root.add(hinge);
+  // the rams: a barrel fixed under the nose, a chrome rod up to the plate
+  const rams = [-1, 1].map((s) => {
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1, 12), steelMat);
+    const rodM = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1, 10), chromeMat);
+    barrel.castShadow = rodM.castShadow = true;
+    cv.root.add(barrel, rodM);
+    const base = new THREE.Vector3(s * W * 0.5, y(0.2), zf - 0.2);
+    const at = new THREE.Vector3(s * W * 0.5, (hP - hH) * 0.55 - 0.03, (zP - zH) * 0.55);   // on the plate's underside (hinge space)
+    return { barrel, rodM, base, at };
+  });
+  cv.flipper = { hinge, rams, t0: -1e9 };
+  poseFlipper(cv, 0);
+}
+const _fa = new THREE.Vector3(), _fd = new THREE.Vector3();
+function poseFlipper(cv, angle) {
+  const F = cv.flipper;
+  F.hinge.rotation.x = -angle;
+  F.hinge.updateMatrix();
+  for (const r of F.rams) {
+    _fa.copy(r.at).applyMatrix4(F.hinge.matrix);               // the plate's end of the ram (car space)
+    _fd.subVectors(_fa, r.base);
+    const len = _fd.length();
+    _fd.divideScalar(len || 1);
+    const bl = Math.min(0.24, len * 0.6);
+    r.barrel.scale.set(1, bl, 1);
+    r.barrel.position.copy(r.base).addScaledVector(_fd, bl / 2);
+    r.barrel.quaternion.setFromUnitVectors(_ty, _fd);
+    r.rodM.scale.set(1, Math.max(0.01, len - bl + 0.04), 1);
+    r.rodM.position.copy(r.base).addScaledVector(_fd, bl - 0.04 + (len - bl + 0.04) / 2);
+    r.rodM.quaternion.copy(r.barrel.quaternion);
+  }
+}
+// the wedge comes off: it flies from the car, tumbles and lies on the floor for 10 s, then sinks away
+const debris = [];
+function detachWedge(cv, v) {
+  const w = cv.wedge;
+  if (!w || !w.attached) return;
+  w.attached = false;
+  w.g.updateWorldMatrix(true, true);
+  const obj = w.g.clone(true);
+  w.g.matrixWorld.decompose(obj.position, obj.quaternion, obj.scale);
+  scene.add(obj);
+  w.g.visible = false;
+  const f = _fw.set(0, 0, 1).applyQuaternion(cv.root.quaternion);
+  const vel = new THREE.Vector3((v ? v.vel[0] * 0.5 : 0) + f.x * 1.5 + rnd(-1, 1), rnd(1.5, 3), (v ? v.vel[2] * 0.5 : 0) + f.z * 1.5 + rnd(-1, 1));
+  debris.push({ obj, vel, w: new THREE.Vector3(rnd(-3, 3), rnd(-2, 2), rnd(-3, 3)), t: 0, rest: false });
+  sfx.fx('wheel', [obj.position.x, obj.position.y, obj.position.z]);
+  if (cv.player === game.human) toast('Таран оторвался!', 1600);
+}
+function tickDebris(dt) {
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const d = debris[i], o = d.obj, vel = d.vel;
+    d.t += dt;
+    if (d.t > 10) { o.position.y -= dt * 0.8; if (d.t > 11.2) { scene.remove(o); debris.splice(i, 1); } continue; }
+    // cars driving into it shove it along
+    for (const cv of carVis.values()) {
+      const pv = cv.player && cv.player.vehicle;
+      if (!pv || !cv.player.alive) continue;
+      const dx = o.position.x - pv.pos[0], dz = o.position.z - pv.pos[2], dist = Math.hypot(dx, dz);
+      if (dist < 2.3 && Math.hypot(pv.vel[0], pv.vel[2]) > 1) {
+        vel.x = pv.vel[0] * 0.9 + dx / dist * 1.5; vel.z = pv.vel[2] * 0.9 + dz / dist * 1.5; vel.y = Math.max(vel.y, 1);
+        d.w.set(rnd(-2, 2), rnd(-2, 2), rnd(-2, 2)); d.rest = false;
+      }
+    }
+    if (d.rest) continue;
+    vel.y -= 9.81 * dt;
+    o.position.addScaledVector(vel, dt);
+    const ang = d.w.length() * dt;
+    if (ang > 1e-5) { _fq.setFromAxisAngle(_fw.copy(d.w).normalize(), ang); o.quaternion.premultiply(_fq); }
+    const floor = world.height(o.position.x, o.position.z) + 0.25;
+    if (o.position.y < floor) {
+      o.position.y = floor;
+      if (vel.y < 0) vel.y = -vel.y * 0.2;
+      vel.x *= 0.8; vel.z *= 0.8; d.w.multiplyScalar(0.6);
+      if (Math.hypot(vel.x, vel.y, vel.z) < 0.4) { d.rest = true; vel.set(0, 0, 0); }
+    }
+    const rr = Math.hypot(o.position.x, o.position.z), lim = ARENA_R - 1;
+    if (rr > lim) { o.position.x *= lim / rr; o.position.z *= lim / rr; vel.x *= -0.3; vel.z *= -0.3; }
+  }
+}
 // bend the equipment to the car's state
 function poseEquipment(cv, v) {
+  const wd = cv.wedge;
+  if (wd) {
+    const st = v.ram ?? 1;
+    if (wd.attached && st <= 0 && game && game.state === 'chase') detachWedge(cv, v);
+    else if (!wd.attached && st > 0) { wd.attached = true; wd.g.visible = true; }
+    if (wd.attached) {
+      const b = 1 - clamp(st, 0, 1);
+      wd.g.scale.set(1 - 0.06 * b, 1 - 0.1 * b, 1 - 0.35 * b);
+      wd.g.rotation.set(0.14 * b, 0.1 * b * wd.tw, 0.06 * b * wd.tw);
+    }
+  }
+  if (cv.flipper) {
+    const t = (performance.now() - cv.flipper.t0) / 1000, A = 1.0;
+    const a = t < 0 ? 0 : t < 0.07 ? A * t / 0.07 : t < 0.35 ? A : t < 0.9 ? A * (1 - (t - 0.35) / 0.55) : 0;
+    if (a !== cv.flipper.a) { cv.flipper.a = a; poseFlipper(cv, a); }
+  }
   const pb = cv.pushBar;
   if (pb) {
     const b = 1 - clamp(v.pushBar ?? 1, 0, 1);
@@ -907,6 +1110,8 @@ function tickFlyingWheels(dt) {
 function restoreWheels() {
   for (const f of flyingWheels) scene.remove(f.obj);
   flyingWheels.length = 0;
+  for (const d of debris) scene.remove(d.obj);
+  debris.length = 0;
   for (const cv of [...carVis.values(), ...decoyVis.values()]) {
     for (const w of cv.wheelObjs) w.o.visible = true;
     for (const e of cv.extraWheels || []) e.o.visible = true;
@@ -1148,12 +1353,13 @@ function equipHtml(c) {
   let h = '';
   if (c.pushBar) h += '<div class="tal">⛨ Кенгурятник <small>удар передом: себе меньше, другому больше · мнётся о стены</small></div>';
   if (c.sideSpikes) h += '<div class="tal">⛨ Боковые шипы <small>лопают шины, которых касаются · тупятся, когда бок смят</small></div>';
+  if (c.ram) h += '<div class="tal">⛨ Стальной таран <small>бьёт машины сильнее, сам почти не страдает · о стены ломается и отваливается</small></div>';
   return h;
 }
 function talentHtml(c) {
   if (!c.talent) return '<div class="tal" style="color:var(--dim)">Без таланта</div>' + equipHtml(c);
   const t = TALENTS[c.talent];
-  const n = t.passive ? 'пассивно' : `${t.charges} ${t.charges === 1 ? 'раз' : 'раза'} за раунд`;
+  const n = t.passive ? 'пассивно' : t.cooldown ? `без лимита · перезарядка ${t.cooldown} с` : `${t.charges} ${t.charges === 1 ? 'раз' : 'раза'} за раунд`;
   return `<div class="tal">★ ${esc(game.talentName(c.talent))} <small>${esc(game.talentDesc(c.talent))} · ${n}</small></div>` + equipHtml(c);
 }
 function renderModGrid() {
@@ -1365,12 +1571,16 @@ function updateGameHud() {
   if (game.state === 'chase' || game.state === 'countdown') {
     const id = game.talentOf(me);
     if (id && TALENTS[id].passive) ab += `<div class="ab passive"><div class="n">${esc(game.talentName(id))}</div><div class="c">пассивно</div></div>`;
-    else if (id) {
+    else if (id && TALENTS[id].cooldown) {
+      const cd = (me.cd && me.cd[id]) || 0;
+      ab += `<div class="ab${cd > 0 ? ' empty' : ''}"><div class="n"><span class="k">1</span>${esc(game.talentName(id))}</div><div class="c">${cd > 0 ? `через ${Math.ceil(cd)} с` : 'готово'}</div></div>`;
+    } else if (id) {
       const n = me.charges[id] || 0;
       ab += `<div class="ab${n ? '' : ' empty'}"><div class="n"><span class="k">1</span>${esc(game.talentName(id))}</div><div class="c">зарядов: ${n}</div></div>`;
     }
   }
   if (game.state === 'chase' || game.state === 'countdown') {
+    if (CARS[me.car].ram) ab += `<div class="ab passive"><div class="n">Таран</div><div class="c">${(me.vehicle.ram ?? 1) > 0 ? Math.round((me.vehicle.ram ?? 1) * 100) + '%' : 'оторван'}</div></div>`;
     if (CARS[me.car].pushBar) ab += `<div class="ab passive"><div class="n">Кенгурятник</div><div class="c">${Math.round((me.vehicle.pushBar ?? 1) * 100)}%</div></div>`;
     if (CARS[me.car].sideSpikes) ab += `<div class="ab passive"><div class="n">Боковые шипы</div><div class="c">Л ${Math.round(game.spikeSharpness(me.vehicle, 1) * 100)}% · П ${Math.round(game.spikeSharpness(me.vehicle, -1) * 100)}%</div></div>`;
   }
@@ -1559,7 +1769,7 @@ function netApplyPlayers(s, first) {
     if (!p) continue;
     p.name = o.id === net.pid ? `${o.n} (ты)` : o.n;
     p.role = o.r; p.color = o.c; p.garage = o.g; p.money = o.m; p.alive = o.a; p.wreck = o.w; p.ready = o.rd;
-    p.wins = o.wins; p.charges = o.ch; p.roundEarn = o.re; p.matchEarn = o.me; p.aliveTime = o.at; p.roundKills = o.k;
+    p.wins = o.wins; p.charges = o.ch; p.cd = o.cd || {}; p.roundEarn = o.re; p.matchEarn = o.me; p.aliveTime = o.at; p.roundKills = o.k;
     p.isBot = o.id !== net.pid; p.remote = false;
     let fresh = first;
     if (p.car !== o.car || p.vehicle.spec.id !== o.car) { p.car = o.car; game._ensureVehicle(p); fresh = true; }
@@ -1694,6 +1904,21 @@ function fxEvent(e) {
     case 'explode': explosion(e.x, e.y, e.z); sfx.explode([e.x, e.y, e.z]);
       { const mv = game.human && game.human.vehicle; if (mv) { const d = Math.hypot(mv.pos[0] - e.x, mv.pos[2] - e.z); if (d < 40) pads.kick(Math.min(1, 1.3 - d / 30), Math.min(1, 1 - d / 40), 0.6); } } { const f = followed(); if (f && f.vehicle && Math.hypot(f.vehicle.pos[0] - e.x, f.vehicle.pos[2] - e.z) < 30) cam.shake = 1; } break;
     case 'smoke': smokeEmitters.push({ x: e.x, z: e.z, r: e.r, t: 1.6 }); break;
+    case 'flip': {
+      const cv = carVis.get(e.player);
+      if (cv && cv.flipper) cv.flipper.t0 = performance.now();
+      const pv = game.players[e.player] && game.players[e.player].vehicle;
+      if (pv) {
+        const f = _fw.set(0, 0, 1).applyQuaternion(cv ? cv.root.quaternion : _fq.identity());
+        const zf = pv.spec.bodyFront;
+        for (let i = 0; i < 14; i++) fx.dust.emit(pv.pos[0] + f.x * zf + rnd(-0.6, 0.6), 0.1, pv.pos[2] + f.z * zf + rnd(-0.6, 0.6), rnd(-2, 2) + f.x * 2, rnd(0.5, 2), rnd(-2, 2) + f.z * 2, rnd(1, 2), 0.4, 2.2, 0.35, DUST, 2, 0.1);
+        const fl = followed();
+        if (fl && (fl.id === e.player || (e.hit || []).includes(fl.id))) cam.shake = Math.min(1, cam.shake + 0.5);
+        if (e.hit && e.hit.includes(game.human.id)) pads.kick(0.9, 0.7, 0.35);
+        if (e.player === game.human.id) pads.kick(0.5, 0.3, 0.15);
+      }
+      break;
+    }
     case 'jump': {
       const v = game.players[e.player].vehicle;
       for (const wh of v.wheels) for (let i = 0; i < 10; i++) fx.dust.emit(wh.cp[0], wh.cp[1] + 0.05, wh.cp[2], rnd(-3, 3), rnd(0.2, 1.5), rnd(-3, 3), rnd(1, 2), 0.4, 2.2, 0.35, DUST, 2, 0.1);
@@ -1827,6 +2052,7 @@ async function start() {
       }
       runDamageQueue();
       tickFlyingWheels(dt);
+      tickDebris(dt);
       if (game.sim) { syncZones(); syncRopes(); }
       tickSmokeScreens(dt);
     } catch (e) { if (!fxErrorShown) { fxErrorShown = true; console.warn('effects:', e); } }
@@ -1917,7 +2143,7 @@ for (const b of document.querySelectorAll('#betQuick button')) {
 $('spinBtn').addEventListener('click', doSpin);
 $('readyBtn').addEventListener('click', () => { if (game && game.human) { if (net.on) net.send({ t: 'ready' }); else game.setReady(game.human); $('readyBtn').disabled = true; $('readyBtn').textContent = 'Ждём остальных…'; } });
 
-if (/_(test|real)\.html$/.test(location.pathname)) window.__salki = { buildCarVisual, disposeVisual, scene, camera, THREE, gfx, renderer, get game() { return game; } };   // local tests only
+if (/_(test|real)\.html$/.test(location.pathname)) window.__salki = { buildCarVisual, disposeVisual, poseFlipper, scene, camera, THREE, gfx, renderer, get game() { return game; } };   // local tests only
 start().catch((e) => {
   console.error(e);
   if (window.showError) window.showError(e && (e.stack || e.message) || e);
