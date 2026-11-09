@@ -124,10 +124,14 @@ function startMatch(o) {
   game.newMatch({ mode: o.mode === 'br' ? 'br' : 'tag', bots: SEATS - 1, chaseTime: clamp(Number(o.chaseTime) || 180, 60, 300), role: 'random' });
   matchId++; matchEndAt = 0;
   for (const p of game.players) makeBot(p);
-  for (const c of clients) { c.pid = null; seat(c); }
+  for (const c of clients) {
+    c.pid = null; seat(c);
+    if (c.money > 0 && c.pid != null) game.players[c.pid].money = c.money;   // the test money each player picked in the menu
+  }
   log(`match ${matchId} (${game.settings.mode}) for ${clients.size} player(s)`);
 }
 function toLobby() { game.state = 'menu'; game.sim = null; for (const c of clients) c.pid = null; }
+const moneyOpt = (v) => ([5000, 20000, 100000].includes(Number(v)) ? Number(v) : 0);
 function playerOf(c) { return c.pid == null ? null : game.players[c.pid]; }
 
 function join(ws) {
@@ -140,10 +144,15 @@ function join(ws) {
     switch (m.t) {
       case 'hello':
         c.name = String(m.name || '').replace(/[<>&"]/g, '').trim().slice(0, 16) || 'Игрок';
+        c.money = moneyOpt(m.money);
         seat(c);
         sendLobby();
         break;
+      case 'money':
+        c.money = moneyOpt(m.v);
+        break;
       case 'start':
+        c.money = moneyOpt(m.money);
         if (!game.sim || game.state === 'menu' || game.state === 'matchEnd') startMatch(m);
         break;
       case 'in':

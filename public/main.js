@@ -1007,7 +1007,7 @@ function initMenu() {
     gfx.setQuality(menuState.gfx);
     try { localStorage.setItem('salki.settings', JSON.stringify(menuState)); } catch (_) { /* ignore */ }
   });
-  for (const b of $('optMoney').querySelectorAll('button')) b.addEventListener('click', () => { if (menuState.myMoney > 0) $('menuMoney').textContent = menuState.myMoney; else if (game && game.human) $('menuMoney').textContent = game.human.money; });
+  for (const b of $('optMoney').querySelectorAll('button')) b.addEventListener('click', () => { if (net.on) net.send({ t: 'money', v: menuState.myMoney }); if (menuState.myMoney > 0) $('menuMoney').textContent = menuState.myMoney; else if (game && game.human) $('menuMoney').textContent = game.human.money; });
   const r = $('optChase');
   r.value = menuState.chaseTime;
   const upd = () => { menuState.chaseTime = Number(r.value); $('optChaseTxt').textContent = fmtTime(menuState.chaseTime); };
@@ -1036,7 +1036,7 @@ function hideHud() {
 async function startMatch() {
   try { localStorage.setItem('salki.settings', JSON.stringify(menuState)); } catch (_) { /* ignore */ }
   if (net.on) {                                   // online: the server starts the match (or we join the one running)
-    net.send({ t: 'start', mode: menuState.mode, chaseTime: menuState.chaseTime });
+    net.send({ t: 'start', mode: menuState.mode, chaseTime: menuState.chaseTime, money: menuState.myMoney });
     $('netStatus').textContent = 'Запускаем матч на сервере…';
     return;
   }
@@ -1441,7 +1441,7 @@ function netConnect() {
     $('netStatus').textContent = 'Не удалось подключиться'; return;
   }
   net.ws = ws;
-  ws.onopen = () => { net.on = true; net.send({ t: 'hello', name }); $('netBtn').textContent = 'Отключиться'; };
+  ws.onopen = () => { net.on = true; net.send({ t: 'hello', name, money: menuState.myMoney }); $('netBtn').textContent = 'Отключиться'; };
   // a free server sleeps after 15 min without messages from players: keep it awake while we sit in the lobby
   const keepAwake = setInterval(() => { if (net.ws === ws) net.send({ t: 'ping' }); else clearInterval(keepAwake); }, 60000);
   ws.onclose = () => {
