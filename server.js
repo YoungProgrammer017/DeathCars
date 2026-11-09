@@ -161,6 +161,9 @@ function join(ws) {
         ws.send(JSON.stringify({ t: 'spinRes', res }));
         break;
       }
+      case 'sel':
+        if (p && game.state === 'upgrade') game.selectCar(p, String(m.car));
+        break;
       case 'ready':
         if (p && game.state === 'upgrade') game.setReady(p);
         break;

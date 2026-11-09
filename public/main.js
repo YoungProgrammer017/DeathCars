@@ -1107,7 +1107,11 @@ function renderModGrid() {
     b.innerHTML = `<div class="t"><span>${esc(c.name)}</span>${price}</div>${talentHtml(c)}${statBars(c)}${st}`;
     b.addEventListener('click', () => {
       if (up.spinning) return;
-      if (own) { if (!driving && game.selectCar(me, id)) { renderModGrid(); selectMod(null); } }
+      if (own) {
+        if (driving) return;
+        if (net.on && net.mid) { net.send({ t: 'sel', car: id }); selectMod(null); }   // the server switches the car, the next snapshot shows it
+        else if (game.selectCar(me, id)) { renderModGrid(); selectMod(null); }
+      }
       else selectMod(id);
     });
     grid.appendChild(b);

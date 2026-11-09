@@ -61,7 +61,7 @@ export const CARS = {
                 accel: 0.85, top: 240, grip: 1.0, steer: 1.0, mass: 1700, armor: 0.9,
                 credit: 'SpatialNeglect (CC BY-NC-ND 4.0)' },
   gt3r:       { name: 'Porsche 911 GT3 R (992)', role: 'hunter', price: 1200, brPrice: 2600, talent: 'glue', engine: 'rear', sideSpikes: true,
-                accel: 1.1, top: 300, grip: 1.08, steer: 1.1, mass: 1300, armor: 1.1,
+                accel: 1.1, top: 300, grip: 1.18, steer: 1.2, mass: 1300, armor: 1.1, downforce: 7,
                 credit: 'Dave Love (CC BY 4.0)' },
   m3a1:       { name: 'M3A1 Scout Car', role: 'hunter', price: 2200, brPrice: 6500, talent: 'harpoon', engine: 'front',
                 accel: 0.74, top: 190, grip: 0.9, steer: 0.9, mass: 4000, armor: 0.55,

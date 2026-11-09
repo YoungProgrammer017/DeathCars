@@ -242,6 +242,8 @@ export function makeSpec(id, geo, st) {
     vmax: st.top / 3.6,
     brakes: { front: B.brakes.front * k * fl.r / 0.339, rear: B.brakes.rear * k * rl.r / 0.364, handbrake: B.brakes.handbrake * k * rl.r / 0.364 },
     steering: { ...B.steering, lock: B.steering.lock * st.steer },
+    // a big rear wing and diffuser (GT3 R): downforce lift coefficient × area, m²
+    aero: st.downforce ? { ...B.aero, clA: st.downforce } : B.aero,
   };
 }
 
@@ -1112,7 +1114,7 @@ export class Vehicle {
     const vmag = Math.hypot(this.vel[0], this.vel[1], this.vel[2]);
     const drag = 0.5 * a.rho * a.cdA * (1 + 0.25 * this.damage.body) * vmag; // bent panels add drag
     F[0] -= drag * this.vel[0]; F[1] -= drag * this.vel[1]; F[2] -= drag * this.vel[2];
-    const down = 0.5 * a.rho * a.clA * this.speed * this.speed;
+    const down = 0.5 * a.rho * a.clA * this.speed * this.speed * Math.max(0, up[1]);  // the wing only presses while the car is upright
     F[0] -= up[0] * down; F[1] -= up[1] * down; F[2] -= up[2] * down;
     // gravity on the sprung body (the wheels carry their own weight through the tyres)
     F[1] -= this.sprungMass * GRAVITY;
