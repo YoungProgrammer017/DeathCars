@@ -113,15 +113,19 @@ function makeBot(p) {
 }
 function seat(c) {
   if (c.pid != null || !game.sim || game.state === 'menu') return;
-  const p = game.players.find((q) => !q.remote);
+  const p = game.players.find((q) => !q.remote || q.left);
   if (!p) { c.ws.send(JSON.stringify({ t: 'full' })); return; }
-  p.remote = true; p.isBot = false; p.name = c.name; p.netInput = null; p.netActions = [];
+  p.remote = true; p.left = false; p.isBot = false; p.name = c.name; p.netInput = null; p.netActions = [];
   if (game.state === 'upgrade') p.ready = false;
   c.pid = p.id;
   c.ws.send(JSON.stringify({ t: 'welcome', pid: p.id, mid: matchId }));
 }
 function startMatch(o) {
-  game.newMatch({ mode: o.mode === 'br' ? 'br' : 'tag', bots: SEATS - 1, chaseTime: clamp(Number(o.chaseTime) || 180, 60, 300), role: 'random' });
+  // players + the bots asked for, up to 4; at least 2 cars in the arena (alone with "no bots" = one bot)
+  const bots = clamp(Math.round(Number(o.bots ?? SEATS - 1)) || 0, 0, SEATS - 1);
+  const total = clamp(clients.size + bots, 2, SEATS);
+  game.newMatch({ mode: o.mode === 'br' ? 'br' : 'tag', bots: total - 1, chaseTime: clamp(Number(o.chaseTime) || 180, 60, 300), role: 'random' });
+  game.noBots = bots === 0;
   matchId++; matchEndAt = 0;
   for (const p of game.players) makeBot(p);
   for (const c of clients) {
@@ -178,7 +182,8 @@ function join(ws) {
   ws.onclose = () => {
     clients.delete(c);
     const p = playerOf(c);
-    if (p && p.remote) makeBot(p);
+    // whoever leaves: a bot takes the car over — or, in a game without bots, the car just stays where it is
+    if (p && p.remote) { if (game.noBots) { p.left = true; p.netInput = null; p.name = `${c.name} (вышел)`; } else makeBot(p); }
     if (!clients.size && game.sim) toLobby();      // nobody left: stop the match
     sendLobby();
   };

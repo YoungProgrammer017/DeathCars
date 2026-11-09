@@ -1295,13 +1295,14 @@ function hideHud() {
 async function startMatch() {
   try { localStorage.setItem('salki.settings', JSON.stringify(menuState)); } catch (_) { /* ignore */ }
   if (net.on) {                                   // online: the server starts the match (or we join the one running)
-    net.send({ t: 'start', mode: menuState.mode, chaseTime: menuState.chaseTime, money: menuState.myMoney });
+    net.send({ t: 'start', mode: menuState.mode, chaseTime: menuState.chaseTime, money: menuState.myMoney, bots: menuState.bots });
     $('netStatus').textContent = 'Запускаем матч на сервере…';
     return;
   }
   showOverlay(null);
   for (const [zn, obj] of zoneVisuals) { scene.remove(obj); zoneVisuals.delete(zn); }
-  game.newMatch({ mode: menuState.mode, bots: menuState.bots, chaseTime: menuState.chaseTime, role: menuState.role, myMoney: menuState.myMoney });
+  if (!menuState.bots) toast('Без ботов можно играть только онлайн — добавлен 1 бот', 3000);
+  game.newMatch({ mode: menuState.mode, bots: Math.max(1, menuState.bots), chaseTime: menuState.chaseTime, role: menuState.role, myMoney: menuState.myMoney });
   $('status').innerHTML = 'Готовим машины…';
   carsBuilding = buildCars();
   await carsBuilding;
