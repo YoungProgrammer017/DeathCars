@@ -222,15 +222,21 @@ function readInput() {
 }
 
 const cam = { yaw: 0, pitch: 0.2, dist: 7.0, smoothDist: 7.0, lastMouse: -10, dragging: false, head: 0, shake: 0, followId: -1 };
+// while driving, a click hides the mouse and locks it: the camera then turns without holding any button (Esc gives the mouse back)
+const canLock = () => !document.querySelector('.overlay.show') && game && (game.state === 'chase' || game.state === 'countdown');
+const mouseLocked = () => document.pointerLockElement === canvas;
 canvas.addEventListener('pointerdown', (e) => {
+  if (!mouseLocked() && canLock() && canvas.requestPointerLock) {
+    try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (_) { /* ignore */ }
+  }
   cam.dragging = true;
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
   canvas.focus();
   hideClickHint();
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (!cam.dragging) return;
-  cam.yaw -= e.movementX * 0.006;
+  if (!cam.dragging && !mouseLocked()) return;
+  cam.yaw = wrap(cam.yaw - e.movementX * 0.006);   // kept within ±180°, so the camera swings back the short way
   cam.pitch = clamp(cam.pitch + e.movementY * 0.004, -0.08, 1.3);
   cam.lastMouse = performance.now() / 1000;
 });
@@ -1762,6 +1768,7 @@ async function start() {
     } catch (e) { if (!fxErrorShown) { fxErrorShown = true; console.warn('effects:', e); } }
 
     // --- camera ---
+    if (mouseLocked() && !canLock()) document.exitPointerLock();   // menus and the garage need the mouse
     const fp = followed();
     const fcv = fp ? carVis.get(fp.id) : null;
     if (fcv) {
@@ -1772,7 +1779,7 @@ async function start() {
       cam.head += wrap(heading - cam.head) * (1 - Math.exp(-dt * 5));
       const idle = !cam.dragging && t - cam.lastMouse > 2.0;
       if (idle && Math.abs(fp.vehicle.speed) > 3) {
-        cam.yaw *= Math.exp(-dt * 2.2);
+        cam.yaw = wrap(cam.yaw) * Math.exp(-dt * 2.2);   // back behind the car by the shortest way
         cam.pitch += (0.2 - cam.pitch) * (1 - Math.exp(-dt * 1.5));
       }
       const lookBack = keys.has('KeyC') ? Math.PI : 0;
