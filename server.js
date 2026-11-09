@@ -102,6 +102,7 @@ const world = new ArenaWorld(ARENA_R);
 const game = new Game(world);
 const clients = new Set();
 let matchId = 0, matchEndAt = 0, seq = 0;
+let lagCur = 0, lagPrev = 0, lagT = 0;   // the latest a tick has fired (ms), this and the last 2-second window
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 function botName(p) { return `Бот ${p.id + 1}`; }
@@ -151,6 +152,10 @@ function join(ws) {
         c.money = moneyOpt(m.money);
         seat(c);
         sendLobby();
+        break;
+      case 'ping':
+        // the answer goes straight back (with how late the server's own ticks have been running)
+        ws.send(JSON.stringify({ t: 'pong', c: m.c, lag: Math.round(Math.max(lagCur, lagPrev)) }));
         break;
       case 'money':
         c.money = moneyOpt(m.v);
@@ -204,7 +209,7 @@ function snapshot() {
   const fx = {};
   for (const p of game.players) if (p.fx && p.fx.length) fx[p.id] = p.fx.splice(0);
   return JSON.stringify({
-    t: 's', id: matchId, st: game.state, tm: Math.round(game.timer * 100) / 100, rd: game.round, sc: game.score,
+    t: 's', id: matchId, ts: Math.round(performance.now()), st: game.state, tm: Math.round(game.timer * 100) / 100, rd: game.round, sc: game.score,
     hh: game.hunterHold, lr: game.lastRound || null, mode: game.settings.mode, ct: game.settings.chaseTime, time: game.time,
     pl: game.players.map(packPlayer),
     z: game.zones.map((zn) => ({ ...packZone(zn), id: zn._nid })),
@@ -219,6 +224,8 @@ let last = performance.now(), snapT = 0, lobbyT = 0;
 setInterval(() => {
   const now = performance.now();
   const dt = Math.min((now - last) / 1000, 0.1);
+  lagCur = Math.max(lagCur, now - last - 1000 / 60);
+  if (now - lagT > 2000) { lagPrev = lagCur; lagCur = 0; lagT = now; }
   last = now;
   if (game.sim && game.state !== 'menu') {
     try { game.update(dt, null, []); } catch (e) { log('update failed: ' + (e && e.stack)); }

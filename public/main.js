@@ -1691,7 +1691,10 @@ function updateAudio(dt) {
 // Online: the match runs on the server (server.js); this browser keeps a copy of the game filled from its
 // snapshots (20 a second), shows it the usual way and sends the keys. Works when the page comes from the server.
 // ---------------------------------------------------------------------------
-const net = { ws: null, on: false, pid: null, mid: 0, gap: 0.05, lastT: 0, sendT: 0, lastIn: '', zones: new Map(), decoys: new Map() };
+const net = { ws: null, on: false, pid: null, mid: 0, gap: 0.05, lastT: 0, sendT: 0, lastIn: '', zones: new Map(), decoys: new Map(),
+  // smoothing: recent car poses by server time; we draw a little in the past (net.delay ms) so a late snapshot
+  // is bridged instead of the cars stopping and jumping
+  hist: [], offs: [], off: 0, delay: 90, rtt: 0, lag: 0 };
 net.send = (m) => { try { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(m)); } catch (_) { /* ignore */ } };
 function netConnect() {
   if (net.ws) return;
@@ -1709,7 +1712,8 @@ function netConnect() {
   net.ws = ws;
   ws.onopen = () => { net.on = true; net.send({ t: 'hello', name, money: menuState.myMoney }); $('netBtn').textContent = 'Отключиться'; };
   // a free server sleeps after 15 min without messages from players: keep it awake while we sit in the lobby
-  const keepAwake = setInterval(() => { if (net.ws === ws) net.send({ t: 'ping' }); else clearInterval(keepAwake); }, 60000);
+  // ping every second (it also keeps the free server awake)
+  const keepAwake = setInterval(() => { if (net.ws === ws) net.send({ t: 'ping', c: performance.now() }); else clearInterval(keepAwake); }, 1000);
   ws.onclose = () => {
     const was = net.on;
     net.ws = null; net.on = false; net.pid = null; net.mid = 0;
@@ -1724,6 +1728,7 @@ function netConnect() {
     else if (m.t === 'full') $('netStatus').textContent = 'Все 4 места заняты';
     else if (m.t === 'lobby') netLobby(m);
     else if (m.t === 's') netSnapshot(m);
+    else if (m.t === 'pong') { const r = performance.now() - m.c; net.rtt = net.rtt ? net.rtt + (r - net.rtt) * 0.3 : r; net.lag = m.lag || 0; }
     else if (m.t === 'spinRes') startSpinAnim(m.res);
   };
 }
@@ -1738,7 +1743,7 @@ function netLobby(m) {
   }
 }
 async function netStartMirror(s) {
-  net.mid = s.id; net.zones.clear(); net.decoys.clear();
+  net.mid = s.id; net.zones.clear(); net.decoys.clear(); net.hist.length = 0; net.offs.length = 0;
   for (const [zn, obj] of zoneVisuals) { scene.remove(obj); zoneVisuals.delete(zn); }
   for (const [, cv] of decoyVis) disposeVisual(cv);
   decoyVis.clear();
@@ -1779,6 +1784,7 @@ function netSnapshot(s) {
   game.state = s.st; game.timer = s.tm; game.round = s.rd; game.score = s.sc; game.hunterHold = s.hh;
   game.lastRound = s.lr; game.time = s.time;
   netApplyPlayers(s, false);
+  netRemember(s, now);
   // oil, glue, spikes on the floor; harpoon ropes; decoys
   const zs = new Set();
   game.zones = s.z.map((o) => {
@@ -1807,14 +1813,53 @@ function netSnapshot(s) {
   }
   for (const id in s.fx) { const p = game.players[id]; if (p && p.fx) p.fx.push(...s.fx[id]); }
 }
-// once a frame online: send the keys (when they change, at least 5 times a second) and blend between snapshots
+// keep the poses of this snapshot (by server time), learn the clock offset and how uneven the arrivals are
+function netRemember(s, now) {
+  if (s.ts == null) return;
+  const poses = new Map();
+  for (const p of game.players) if (p.vehicle) poses.set(p.id, { p: Array.from(p.vehicle.pos), q: Array.from(p.vehicle.q), v: Array.from(p.vehicle.vel) });
+  net.hist.push({ ts: s.ts, poses });
+  while (net.hist.length > 40) net.hist.shift();
+  // offset = the fastest arrival seen lately; the spread above it is the jitter we have to cover
+  net.offs.push(now - s.ts);
+  if (net.offs.length > 80) net.offs.shift();
+  const min = Math.min(...net.offs);
+  if (!net.off || Math.abs(min - net.off) > 500) net.off = min; else net.off += (min - net.off) * 0.1;
+  const j = net.offs.map((o) => o - min).sort((a, b) => a - b), j90 = j[Math.floor(j.length * 0.9)] || 0;
+  net.delay += (clamp(net.gap * 1000 + j90 + 10, 60, 250) - net.delay) * 0.05;
+}
+// put every car at the pose it had `delay` ms ago (server time), between the two snapshots around that moment;
+// if the next one is late, carry on along its speed for a moment instead of freezing
+function netPose(now) {
+  const H = net.hist;
+  if (H.length < 2) return null;
+  const t = now - net.off - net.delay;
+  let i = H.length - 2;
+  while (i > 0 && H[i].ts > t) i--;
+  const a = H[i], b = H[i + 1];
+  let alpha = (t - a.ts) / Math.max(1, b.ts - a.ts), over = 0;
+  if (alpha > 1) { over = Math.min((t - b.ts) / 1000, 0.25); alpha = 1; }
+  alpha = Math.max(0, alpha);
+  for (const p of game.players) {
+    const v = p.vehicle, A = a.poses.get(p.id), B = b.poses.get(p.id);
+    if (!v || !A || !B) continue;
+    v.prevPos[0] = A.p[0]; v.prevPos[1] = A.p[1]; v.prevPos[2] = A.p[2];
+    v.prevQ[0] = A.q[0]; v.prevQ[1] = A.q[1]; v.prevQ[2] = A.q[2]; v.prevQ[3] = A.q[3];
+    v.pos[0] = B.p[0] + B.v[0] * over; v.pos[1] = B.p[1] + B.v[1] * over; v.pos[2] = B.p[2] + B.v[2] * over;
+    v.q[0] = B.q[0]; v.q[1] = B.q[1]; v.q[2] = B.q[2]; v.q[3] = B.q[3];
+    if (over) { v.prevPos.set(v.pos); v.prevQ.set(v.q); }
+  }
+  return over ? 1 : alpha;
+}
+// once a frame online: send the keys (when they change, at least 5 times a second) and place the cars
 function netFrame(now, input, actions) {
   const playing = game.state === 'chase' || game.state === 'countdown';
   const i = playing ? [input.throttle, input.brake, Math.round(input.steer * 100) / 100, input.handbrake ? 1 : 0] : [0, 0, 0, 0];
   const key = i.join(',');
   if (key !== net.lastIn || now - net.sendT > 200) { net.send({ t: 'in', i }); net.lastIn = key; net.sendT = now; }
   for (const a of actions) net.send({ t: 'act', a });
-  return clamp((now - net.lastT) / 1000 / net.gap, 0, 1);
+  const al = netPose(now);
+  return al != null ? al : clamp((now - net.lastT) / 1000 / net.gap, 0, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -2131,7 +2176,16 @@ async function start() {
     if (me && game.state !== 'menu' && !carsBuilding) { updateGameHud(); updateLabels(); }
     try { updateAudio(dt); } catch (e) { /* sound is optional */ }
     fpsFrames++; fpsTime += dt;
-    if (fpsTime >= 0.5) { setText('fps', hud.fps, `${Math.round(fpsFrames / fpsTime)} FPS`); fpsFrames = 0; fpsTime = 0; }
+    if (fpsTime >= 0.5) {
+      setText('fps', hud.fps, `${Math.round(fpsFrames / fpsTime)} FPS`); fpsFrames = 0; fpsTime = 0;
+      // online: the ping, and a warning when the server itself is falling behind
+      const pe = $('ping');
+      if (pe) {
+        const txt = net.on && net.rtt ? `${Math.round(net.rtt)} мс${net.lag > 60 ? ' · сервер тормозит' : ''}` : '';
+        setText('ping', pe, txt);
+        pe.style.color = !net.on ? '' : net.lag > 60 || net.rtt > 150 ? '#ff6b5b' : net.rtt > 90 ? '#ffc54d' : '';
+      }
+    }
 
     gfx.render();
   }

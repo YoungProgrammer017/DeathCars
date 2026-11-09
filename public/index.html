@@ -31,6 +31,7 @@
   .tag.off { text-decoration: line-through; opacity: 0.5; }
   .tag.active { background: var(--warn); color: #111; border-color: var(--warn); }
   #fps { font-size: 12px; color: var(--dim); margin-left: 6px; font-variant-numeric: tabular-nums; min-width: 62px; }
+  #ping { font-size: 12px; color: var(--dim); margin-left: 4px; font-variant-numeric: tabular-nums; }
 
   #damage { right: 22px; bottom: 178px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
   #damage svg { width: 84px; height: 151px; flex: none; }
@@ -170,7 +171,7 @@
 </div>
 
 <div id="assists" class="hud panel">
-  <span id="fps">— FPS</span>
+  <span id="fps">— FPS</span><span id="ping" title="пинг до сервера"></span>
 </div>
 
 <div id="topbar" class="hud panel" style="display:none">
