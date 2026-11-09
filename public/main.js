@@ -1904,6 +1904,19 @@ function fxEvent(e) {
     case 'explode': explosion(e.x, e.y, e.z); sfx.explode([e.x, e.y, e.z]);
       { const mv = game.human && game.human.vehicle; if (mv) { const d = Math.hypot(mv.pos[0] - e.x, mv.pos[2] - e.z); if (d < 40) pads.kick(Math.min(1, 1.3 - d / 30), Math.min(1, 1 - d / 40), 0.6); } } { const f = followed(); if (f && f.vehicle && Math.hypot(f.vehicle.pos[0] - e.x, f.vehicle.pos[2] - e.z) < 30) cam.shake = 1; } break;
     case 'smoke': smokeEmitters.push({ x: e.x, z: e.z, r: e.r, t: 1.6 }); break;
+    case 'landing': {
+      // a hard landing: a thud, a ring of dust, the camera and the pad shake
+      const sev = clamp(e.h / 4, 0.15, 1.2), gy = world.height(e.x, e.z) + 0.05;
+      sfx.impact([e.x, gy, e.z], sev, 'ground');
+      for (let i = 0; i < 10 + 25 * Math.min(sev, 1); i++) {
+        const a = Math.random() * Math.PI * 2, sp = rnd(2, 5) * (0.5 + sev);
+        fx.dust.emit(e.x + Math.sin(a) * 1.2, gy, e.z + Math.cos(a) * 1.2, Math.sin(a) * sp, rnd(0.3, 1.5), Math.cos(a) * sp, rnd(1.2, 2.2), 0.5, 2.4, 0.35, DUST, 2, 0.1);
+      }
+      const fl = followed();
+      if (fl && fl.id === e.player) cam.shake = Math.min(1, cam.shake + 0.3 + 0.5 * sev);
+      if (e.player === game.human.id) pads.kick(Math.min(1, 0.4 + 0.6 * sev), Math.min(1, 0.3 + 0.5 * sev), 0.25 + 0.2 * sev);
+      break;
+    }
     case 'flip': {
       const cv = carVis.get(e.player);
       if (cv && cv.flipper) cv.flipper.t0 = performance.now();

@@ -30,6 +30,12 @@ export const RULES = {
   ramBonus: 1.5,          // 'ram' talent: the runner takes 50% more…
   ramSelf: 0.5,           // …and the hunter half of his already small share
   fromWalls: 0.45,        // walls: every car takes 45% of the energy (the hunter as much as the runners)
+  fromGround: 0.85,       // the ground (a car landing on its roof or side, rolling over): most of it
+  // falls: a car lands on its wheels without harm from up to ~1 m (4.5 m/s); every metre above that
+  // breaks the suspension and the rims, shakes the engine off its mounts and, from high up, hurts the driver
+  landSafe: 4.5,          // m/s (per car: CARS[id].landing — a rally car or an army truck takes more)
+  landRoofSafe: 2.5, landRoof: 0.35,   // on the roof or the side: from 2.5 m/s (30 cm) the body takes 35% of the fall
+  landSusp: 0.2, landWheel: 0.12, landEngine: 0.07, landGearbox: 0.05, landBody: 0.06, landDriver: 0.07,
   wallMinSpeed: 3,        // m/s: softer knocks don't crush anything
   pushBarEnergy: 60000,   // J: what a new push bar soaks up from wall hits before it's flat
   pushBarSelf: 4,         // its car's front is this many times stiffer (takes that much less)…
@@ -373,6 +379,7 @@ export class Game {
       v.events.length = 0;
     }
     for (const d of this.decoys) d.vehicle.events.length = 0;
+    if (this.state === 'chase') for (const p of this.players) if (p.alive) this._landing(p);
 
     if (this.state === 'chase') {
       this._updateTimed(dt);
@@ -391,6 +398,46 @@ export class Game {
     return this.alpha;
   }
 
+  // A fall: follow the vertical speed; when most of it is gone at once (the car hit the ground — or a car under
+  // it), that was a landing at the fastest speed it fell. On the wheels it breaks the running gear and shakes the
+  // rest (on the roof/side the body contacts crush it already, see _wallHit).
+  _landing(p) {
+    const v = p.vehicle, L = p.land || (p.land = { minVy: 0 });
+    const vy = v.vel[1];
+    if (vy < L.minVy) { L.minVy = vy; return; }
+    if (vy < L.minVy * 0.3) return;                       // still falling / still being caught by the springs
+    const fall = -L.minVy;
+    L.minVy = Math.min(0, vy);
+    const safe = CARS[p.car].landing || RULES.landSafe, up = this._upY(v);
+    if (up < 0.6) {
+      // on the roof: the whole roof comes down on the seats; on the side: the doors cave in
+      if (fall <= RULES.landRoofSafe) return;
+      const E = 0.5 * v.m * (fall * fall - RULES.landRoofSafe ** 2) * RULES.landRoof;
+      if (up < -0.3) { const ds = v.driverSeat; v.absorbRoof([ds[0], v.topAt(ds[1]), ds[1]], [0, -1, 0], E); }
+      else {
+        const g = v.dirToLocal([0, -1, 0]), s = g[0] >= 0 ? 1 : -1, x1 = v.spec.outline[s > 0 ? 1 : 0];
+        v.absorbHit([x1, 0.2, 0], [-s, 0, 0], E, 'ground');
+      }
+      this.emit({ type: 'fx', kind: 'landing', player: p.id, h: E / (v.m * 9.81 * 0.35), x: v.pos[0], y: v.pos[1], z: v.pos[2] });
+      this._checkWreck(p);
+      return;
+    }
+    if (fall <= safe) return;
+    const h = (fall * fall - safe * safe) / (2 * 9.81);      // metres of drop above what the car takes
+    const on = [];
+    for (let i = 0; i < 4; i++) if (v.wheels[i].contact && !v.wheels[i].detached) on.push(i);
+    const D = v.damage, share = on.length ? Math.min(2, 4 / on.length) : 1;
+    for (const i of on.length ? on : [0, 1, 2, 3]) {
+      D.susp[i] = Math.min(1, D.susp[i] + RULES.landSusp * h * share);
+      D.wheels[i] = Math.min(1, D.wheels[i] + RULES.landWheel * h * share);
+    }
+    D.engine = Math.min(1, D.engine + RULES.landEngine * h);
+    D.gearbox = Math.min(1, D.gearbox + RULES.landGearbox * h);
+    D.body = Math.min(1, D.body + RULES.landBody * h);
+    D.driver = Math.min(1, D.driver + RULES.landDriver * Math.max(0, h - 1.5));
+    this.emit({ type: 'fx', kind: 'landing', player: p.id, h, x: v.pos[0], y: v.pos[1], z: v.pos[2] });
+    this._checkWreck(p);
+  }
   _upY(v) { return 1 - 2 * (v.q[0] * v.q[0] + v.q[2] * v.q[2]); }
 
   // one crash = one hit: a second touch of the same spot right after only adds the energy above the first one
@@ -402,7 +449,7 @@ export class Game {
       const add = Math.max(0, E - w.E); w.E = Math.max(w.E, E); w.t = this.time; E = add;
     } else p.wallHit = { t: this.time, E, p: ev.p };
     if (E <= 0) return;
-    let Eb = E * RULES.fromWalls;
+    let Eb = E * (ev.kind === 'ground' ? RULES.fromGround : RULES.fromWalls);
     // a push bar takes a front hit first, and bends
     if (v.pushBar > 0 && v.isFrontHit(ev.p, ev.n)) {
       const take = Math.min(Eb * 0.85, v.pushBar * RULES.pushBarEnergy);

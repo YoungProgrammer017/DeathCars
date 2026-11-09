@@ -46,7 +46,7 @@ export const CARS = {
                 accel: 0.82, top: 220, grip: 0.96, steer: 1.0, mass: 1150, armor: 1.0, downforce: 1.3,
                 credit: 'Karol Miklas (CC BY-SA 4.0)' },
   fulvia:     { name: 'Lancia Fulvia Rallye', role: 'runner', price: 1500, brPrice: 1300, talent: 'jump', engine: 'front',
-                accel: 0.8, top: 210, grip: 1.12, steer: 1.15, mass: 950, armor: 0.95, downforce: 1.4,
+                accel: 0.8, top: 210, grip: 1.12, steer: 1.15, mass: 950, armor: 0.95, landing: 7.5, downforce: 1.4,
                 credit: 'Floppy (CC BY-NC 4.0)' },
   alfa33:     { name: 'Alfa Romeo 33 Stradale', role: 'runner', price: 2200, brPrice: 1700, talent: 'flip', flipper: true, engine: 'mid',
                 accel: 0.95, top: 260, grip: 1.12, steer: 1.18, mass: 700, armor: 1.25, downforce: 2.8,
@@ -65,10 +65,10 @@ export const CARS = {
                 accel: 1.1, top: 300, grip: 1.22, steer: 1.28, mass: 1300, armor: 1.1, downforce: 8,
                 credit: 'Dave Love (CC BY 4.0)' },
   m3a1:       { name: 'M3A1 Scout Car', role: 'hunter', price: 2200, brPrice: 6500, talent: null, engine: 'front',
-                accel: 0.74, top: 190, grip: 0.9, steer: 0.9, mass: 4000, armor: 0.55, downforce: 0.6,
+                accel: 0.74, top: 190, grip: 0.9, steer: 0.9, mass: 4000, armor: 0.55, landing: 5.5, downforce: 0.6,
                 credit: 'Gerhald (CC BY 4.0)' },
   armored:    { name: 'Armored Car', role: 'hunter', price: 4000, brPrice: 9000, talent: null, engine: 'front',
-                accel: 0.66, top: 175, grip: 0.86, steer: 0.85, mass: 7000, armor: 0.4, downforce: 0.6,
+                accel: 0.66, top: 175, grip: 0.86, steer: 0.85, mass: 7000, armor: 0.4, landing: 6, downforce: 0.6,
                 credit: 'Fredrik (CC BY 4.0)' },
 };
 
